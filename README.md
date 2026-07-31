@@ -36,9 +36,10 @@ LXD インスタンスをブラウザから管理するための Web UI です�
 curl -fsSL -o /tmp/install-easylxd1.sh \
   https://raw.githubusercontent.com/hirogura/easylxd/main/install-easylxd1.sh
 chmod +x /tmp/install-easylxd1.sh
-/tmp/install-easylxd1.sh
+sudo /tmp/install-easylxd1.sh
 ```
 
+> root 権限が必要です。通常ユーザーで実行する場合は `sudo` を付けてください。
 > 注意: スクリプトの実行前に、スクリプトの内容を確認してください。
 
 インストール完了時には、以下が表示されます。
@@ -102,7 +103,7 @@ npm パッケージを更新したうえでサービスを再起動します。
 curl -fsSL -o /tmp/install-easylxd1.sh \
   https://raw.githubusercontent.com/hirogura/easylxd/main/install-easylxd1.sh
 chmod +x /tmp/install-easylxd1.sh
-/tmp/install-easylxd1.sh
+sudo /tmp/install-easylxd1.sh
 ```
 
 ### アンインストール
