@@ -9,7 +9,7 @@ LXD インスタンスをブラウザから管理するための Web UI です�
 - スナップショット作成・復元・削除
 - クローン
 - GPU パススルー
-
+<img width="512" height="309" alt="Image" src="https://github.com/user-attachments/assets/7a83155c-d35c-4f78-8e4c-3e367c62a16d" />
 ---
 
 ## 必要要件
