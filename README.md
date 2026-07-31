@@ -162,3 +162,7 @@ rm -rf /opt/easy-lxd
 インスタンス作成時に「/opt/lxd-data マウント」を有効にすると、
 コンテナ内の `/opt/lxd-data` にホストの `/opt/lxd-data` がマウントされ、
 UID/GID 1000 で共有されます。
+
+## ライセンス
+
+このプロジェクトは [MIT License](LICENSE) の下で公開されています。
