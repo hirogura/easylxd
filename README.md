@@ -15,7 +15,7 @@ LXD インスタンスをブラウザから管理するための Web UI です�
 ## 必要要件
 
 - Ubuntu（または systemd が動く Linux）
-- LXD がインストール済みで、`lxc` コマンドが使えること
+- LXD（未導入の場合は手順1 の `lxd-setup.sh` で導入できます）
 - Tailscale がインストール済みで、ログイン済みであること
 - root 権限
 - インターネット接続
@@ -29,6 +29,32 @@ LXD インスタンスをブラウザから管理するための Web UI です�
 ---
 
 ## インストール
+
+### 手順1: LXD のセットアップ（未導入の場合のみ）
+
+LXD がまだインストールされていない場合は、先にセットアップスクリプトを実行してください。
+
+```bash
+curl -fsSL -o /tmp/lxd-setup.sh \
+  https://raw.githubusercontent.com/hirogura/easylxd/main/lxd-setup.sh
+chmod +x /tmp/lxd-setup.sh
+/tmp/lxd-setup.sh
+```
+
+実行内容（何度実行しても安全・既に設定済みの項目はスキップ）:
+
+- LXD のインストール（snap）
+- `lxd init --minimal` による初期化
+- ストレージプールを `/opt/lxd-pool` に変更
+- HTTPS API の有効化（`:8443`）
+- LXD UI の有効化
+- 実行ユーザーを `lxd` グループに追加
+
+**完了後、一度再起動してから次の手順に進んでください。**
+
+> 既に LXD がインストール済みで動作している場合は、この手順は不要です。
+
+### 手順2: Easy LXD UI のインストール
 
 インストールスクリプトをダウンロードして実行します。
 
