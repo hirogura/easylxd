@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<title>Easy LXD</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0f1117;--surface:#1a1d27;--surface2:#242837;--border:#2d3148;--text:#e1e4ed;--text2:#8b90a5;--accent:#5b8af5;--accent-hover:#4a77e0;--green:#3dd68c;--red:#f55b6a;--yellow:#f5c95b;--orange:#f59b5b;--radius:8px;--shadow:0 2px 8px rgba(0,0,0,.3)}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+a{color:var(--accent);text-decoration:none}
+.header{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 24px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:100}
+.header h1{font-size:20px;font-weight:600}.header .subtitle{color:var(--text2);font-size:14px}.header .actions{margin-left:auto;display:flex;gap:8px}
+.container{max-width:1200px;margin:0 auto;padding:24px}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border:none;border-radius:var(--radius);font-size:14px;font-weight:500;cursor:pointer;transition:all .15s}
+.btn:disabled{opacity:.5;cursor:not-allowed}.btn-primary{background:var(--accent);color:#fff}.btn-primary:hover:not(:disabled){background:var(--accent-hover)}
+.btn-danger{background:var(--red);color:#fff}.btn-danger:hover:not(:disabled){opacity:.85}
+.btn-ghost{background:transparent;color:var(--text2);border:1px solid var(--border)}.btn-ghost:hover:not(:disabled){background:var(--surface2);color:var(--text)}
+.btn-restore{background:rgba(56,189,248,.15);color:#38bdf8;border:1px solid rgba(56,189,248,.3)}.btn-restore:hover:not(:disabled){background:rgba(56,189,248,.25);border-color:rgba(56,189,248,.5)}
+.btn-sm{padding:5px 10px;font-size:13px}.btn-icon{padding:6px 8px}
+.table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+table{width:100%;border-collapse:collapse}
+th{background:var(--surface2);text-align:left;padding:12px 16px;font-size:13px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)}
+td{padding:12px 16px;border-bottom:1px solid var(--border);font-size:15px;vertical-align:middle}
+tr:last-child td{border-bottom:none}tr:hover td{background:rgba(91,138,245,.04)}
+.badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+.badge-running{background:rgba(61,214,140,.15);color:var(--green)}.badge-stopped{background:rgba(245,91,106,.15);color:var(--red)}.badge-other{background:rgba(245,201,91,.15);color:var(--yellow)}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;justify-content:center;align-items:center}
+.modal-overlay.active{display:flex}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;width:520px;max-width:90vw;max-height:85vh;overflow-y:auto;box-shadow:var(--shadow)}
+.modal-header{padding:20px 24px 0;display:flex;justify-content:space-between;align-items:center}.modal-header h2{font-size:18px}
+.modal-close{background:none;border:none;color:var(--text2);font-size:22px;cursor:pointer;padding:4px}.modal-close:hover{color:var(--text)}
+.modal-body{padding:20px 24px}.modal-footer{padding:16px 24px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}
+.form-group{margin-bottom:16px}.form-group label{display:block;font-size:14px;font-weight:500;color:var(--text2);margin-bottom:6px}
+.form-group input,.form-group select{width:100%;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:15px}
+.form-group input:focus,.form-group select:focus{outline:none;border-color:var(--accent)}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:var(--radius);font-size:14px;font-weight:500;z-index:300;animation:slideUp .3s ease;max-width:400px;display:flex;align-items:center;gap:10px}
+.toast-success{background:var(--green);color:#000}.toast-error{background:var(--red);color:#fff}
+.toast-working{background:var(--surface2);color:var(--text);border:1px solid var(--accent)}.toast-working .spinner{border-top-color:var(--accent)}
+.toast-working.pulse{animation:pulse 1.5s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+@media(max-width:768px){.header{flex-wrap:wrap;gap:8px}.header .actions{width:100%}td{padding:8px 12px;font-size:13px}.actions-cell{display:flex;flex-wrap:wrap;gap:4px}}
+.snap-section{margin-top:8px}.snap-section summary{cursor:pointer;color:var(--text2);font-size:13px;padding:4px 0}
+.snap-list{margin-top:6px;display:flex;flex-direction:column;gap:4px}
+.snap-item{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--surface2);border-radius:6px;font-size:13px}
+.snap-item .snap-name{flex:1;color:var(--text)}.snap-item .snap-date{color:var(--text2);font-size:12px}
+.inst-name{font-weight:600;font-family:'SF Mono',Consolas,monospace;font-size:14px}
+.inst-name.clickable{cursor:pointer;transition:color .15s}.inst-name.clickable:hover{color:var(--accent)}
+.overview-row td{padding:0 16px 12px !important;background:rgba(91,138,245,.03) !important}
+.overview-panel{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;padding:12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius)}
+.overview-title{font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+.overview-item{display:flex;align-items:baseline;gap:8px;padding:3px 0;font-size:14px}
+.overview-label{color:var(--accent);font-weight:500;min-width:80px;font-family:'SF Mono',Consolas,monospace;font-size:13px}
+.overview-value{color:var(--text);font-family:'SF Mono',Consolas,monospace;font-size:13px}.overview-scope{color:var(--text2);font-size:12px}
+.overview-empty{color:var(--text2);font-style:italic;font-size:13px}
+@media(max-width:900px){.overview-panel{grid-template-columns:1fr}}
+.confirm-msg{font-size:15px;line-height:1.6;margin-bottom:8px}.confirm-name{font-weight:700;color:var(--accent)}
+.checkbox-label{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;font-size:14px;margin-bottom:6px;transition:all .15s}
+.checkbox-label:hover{border-color:var(--accent)}.checkbox-label:has(input:checked){border-color:var(--accent);background:rgba(91,138,245,.08)}
+.checkbox-label input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px}.checkbox-label.disabled{opacity:.4;cursor:not-allowed;pointer-events:none}
+.checkbox-note{font-size:12px;color:var(--text2);margin-top:4px}
+.gpu-item{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:6px;transition:all .15s}
+.gpu-item:hover{border-color:var(--accent)}.gpu-item .gpu-desc{flex:1;font-size:14px}
+.gpu-item .gpu-pci{color:var(--text2);font-size:12px;font-family:'SF Mono',Consolas,monospace}
+.gpu-item .gpu-current{border-color:var(--green);background:rgba(61,214,140,.08)}.gpu-item .gpu-current .gpu-label{color:var(--green);font-size:12px;font-weight:600}
+.gpu-item .gpu-remove{color:var(--red);cursor:pointer;font-size:13px}.gpu-item .gpu-remove:hover{text-decoration:underline}
+.gpu-item.clickable{cursor:pointer}.gpu-item.clickable:hover{border-color:var(--accent);background:rgba(91,138,245,.08)}
+.gpustat-link{cursor:pointer;transition:color .15s;color:var(--text2)}.gpustat-link:hover{color:var(--accent)}
+.image-row{display:flex;gap:8px;align-items:stretch}.image-row select{flex:1}.image-row .btn{white-space:nowrap}
+.terminal-bar{display:flex;align-items:center;justify-content:space-between;padding:6px 16px;background:var(--surface2);border-top:1px solid var(--border)}
+.terminal-bar .term-title{font-size:13px;font-weight:600;color:var(--text2)}
+.terminal-bar .term-actions{display:flex;gap:6px;align-items:center}
+#terminalPanel{display:none;position:fixed;bottom:0;left:0;right:0;height:40vh;background:var(--surface);border-top:none;z-index:150;flex-direction:column}
+#terminalPanel.active{display:flex}
+#termDragHandle{height:6px;background:var(--border);cursor:ns-resize;flex-shrink:0;transition:background .15s}
+#termDragHandle:hover{background:var(--accent)}
+#terminalContainer{flex:1;padding:2px;overflow:hidden;min-height:80px}
+.terminal-bar .btn-ghost{padding:4px 10px;font-size:12px}
+.create-progress-panel{position:fixed;bottom:0;left:0;right:0;height:50vh;background:var(--surface);border-top:2px solid var(--accent);z-index:160;display:none;flex-direction:column}
+.create-progress-panel.active{display:flex}
+.create-progress-header{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:var(--surface2);border-bottom:1px solid var(--border);flex-shrink:0}
+.create-progress-header .cp-title{font-size:14px;font-weight:600;color:var(--text)}
+.create-progress-header .cp-status{font-size:13px;color:var(--text2);display:flex;align-items:center;gap:8px}
+.create-progress-header .cp-close{background:none;border:none;color:var(--text2);font-size:18px;cursor:pointer;padding:4px 8px;border-radius:4px}.create-progress-header .cp-close:hover{background:var(--surface);color:var(--text)}
+#createProgressLog{flex:1;overflow-y:auto;padding:12px 16px;font-family:'SF Mono',Consolas,'Courier New',monospace;font-size:13px;line-height:1.6;color:var(--text);white-space:pre-wrap;word-break:break-all}
+.cp-log-line{padding:1px 0}.cp-log-line.log-time{color:var(--text2)}.cp-log-line.log-success{color:var(--green);font-weight:600}.cp-log-line.log-error{color:var(--red);font-weight:600}
+</style>
+</head>
+<body>
+<div class="header"><div><h1>Easy LXD</h1><div class="subtitle">LXD インスタンス管理</div></div><div class="actions"><button class="btn btn-ghost btn-sm" onclick="refresh()">更新</button><button class="btn btn-primary" onclick="showCreate()">+ 新規インスタンス</button></div></div>
+<div class="container"><div class="table-wrap"><table><thead><tr><th>名前</th><th>状態</th><th>作成日</th><th>プロファイル</th><th>操作</th></tr></thead><tbody id="instances"></tbody></table></div></div>
+<div id="terminalPanel"><div id="termDragHandle"></div><div class="terminal-bar"><span class="term-title">ターミナル — <span id="termInstanceName"></span></span><div class="term-actions"><button class="btn btn-ghost btn-sm" onclick="resetTerminal()" title="セッションをリセット">⟳ リセット</button><button class="btn btn-ghost btn-sm" onclick="termFit()" title="画面に合わせる">FIT</button><button class="btn btn-ghost btn-sm" onclick="closeTerminal()">✕ 閉じる</button></div></div><div id="terminalContainer"></div></div>
+<div class="create-progress-panel" id="createProgressPanel"><div class="create-progress-header"><span class="cp-title">インスタンス作成 — <span id="cpInstanceName"></span></span><div class="cp-status"><div class="spinner" id="cpSpinner"></div><span id="cpStatusText">作成中...</span><button class="cp-close" onclick="closeCreateProgress()" title="閉じる">&times;</button></div></div><div id="createProgressLog"></div></div>
+<div class="modal-overlay" id="createModal"><div class="modal"><div class="modal-header"><h2>インスタンス作成</h2><button class="modal-close" onclick="closeModals()">&times;</button></div><div class="modal-body"><div class="form-group"><label>インスタンス名</label><input type="text" id="newName" placeholder="例: my-server" pattern="[a-zA-Z0-9_-]+"></div><div class="form-group"><label>イメージ</label><div class="image-row"><select id="newImage"><option value="">読み込み中...</option></select><button class="btn btn-ghost btn-sm" id="refreshImagesBtn" onclick="doRefreshImages()" title="新しいイメージを確認">↻ 確認</button></div><input type="text" id="newImageCustom" placeholder="例: ubuntu:24.04, debian:12, alpine/3.18" style="display:none;margin-top:8px"></div><div class="form-group" id="optsGroup" style="display:none"><label>オプション</label><label class="checkbox-label"><input type="checkbox" id="optUpdate" checked> アップデート (apt upgrade)</label><label class="checkbox-label"><input type="checkbox" id="optTailscale" checked> Tailscale</label><label class="checkbox-label"><input type="checkbox" id="optDocker"> Docker</label><label class="checkbox-label"><input type="checkbox" id="optMount" checked> /opt/lxd-data マウント</label></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModals()">キャンセル</button><button class="btn btn-primary" id="createBtn" onclick="doCreate()" disabled>作成</button></div></div></div>
+<div class="modal-overlay" id="cloneModal"><div class="modal"><div class="modal-header"><h2>インスタンスのクローン</h2><button class="modal-close" onclick="closeModals()">&times;</button></div><div class="modal-body"><div class="form-group"><label>ソース</label><input type="text" id="cloneSource" readonly></div><div class="form-group"><label>新しいインスタンス名</label><input type="text" id="cloneNewName" placeholder="例: my-server-copy"></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModals()">キャンセル</button><button class="btn btn-primary" id="cloneBtn" onclick="doClone()">クローン</button></div></div></div>
+<div class="modal-overlay" id="snapshotModal"><div class="modal"><div class="modal-header"><h2>スナップショット作成</h2><button class="modal-close" onclick="closeModals()">&times;</button></div><div class="modal-body"><div class="form-group"><label>インスタンス</label><input type="text" id="snapInstance" readonly></div><div class="form-group"><label>コメント（任意）</label><input type="text" id="snapComment" placeholder="例: before-update"></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModals()">キャンセル</button><button class="btn btn-primary" id="snapBtn" onclick="doSnapshot()">作成</button></div></div></div>
+<div class="modal-overlay" id="confirmModal"><div class="modal" style="width:400px"><div class="modal-header"><h2 id="confirmTitle">確認</h2><button class="modal-close" onclick="closeModals()">&times;</button></div><div class="modal-body"><p class="confirm-msg" id="confirmMsg"></p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModals()">キャンセル</button><button class="btn btn-danger" id="confirmBtn">確認</button></div></div></div>
+<div class="modal-overlay" id="gpuModal"><div class="modal" style="width:560px"><div class="modal-header"><h2>GPU パススルー</h2><button class="modal-close" onclick="closeModals()">&times;</button></div><div class="modal-body"><div class="form-group"><label>インスタンス</label><input type="text" id="gpuInstance" readonly></div><div class="form-group"><label>現在の GPU デバイス</label><div id="gpuCurrentList"></div></div><div class="form-group"><label>ホストの利用可能な GPU</label><div id="gpuAvailableList"></div></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModals()">閉じる</button></div></div></div>
+<script>
+let instances=[],imageList=[];
+async function api(path,opts={}){const res=await fetch(path,{headers:{'Content-Type':'application/json'},...opts,body:opts.body?JSON.stringify(opts.body):undefined});return res.json()}
+function toast(msg,type='success'){const el=document.createElement('div');el.className=`toast toast-${type}`;el.textContent=msg;document.body.appendChild(el);setTimeout(()=>el.remove(),3000)}
+function toastWorking(msg){const el=document.createElement('div');el.className='toast toast-working pulse';el.innerHTML=`<div class="spinner"></div><span>${esc(msg)}</span>`;document.body.appendChild(el);return{done(okMsg){el.className='toast toast-success';el.innerHTML=`<span>${esc(okMsg)}</span>`;setTimeout(()=>el.remove(),3000)},fail(errMsg){el.className='toast toast-error';el.innerHTML=`<span>${esc(errMsg)}</span>`;setTimeout(()=>el.remove(),4000)},remove(){el.remove()}}}
+function formatDate(d){if(!d)return'-';return new Date(d).toLocaleString('ja-JP',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
+function statusBadge(s){const cls=s==='Running'?'running':s==='Stopped'?'stopped':'other';const labels={Running:'実行中',Stopped:'停止中'};return`<span class="badge badge-${cls}">${labels[s]||s}</span>`}
+async function refresh(){const t=document.getElementById('instances');t.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:32px"><div class="spinner"></div></td></tr>';try{instances=await api('/api/instances');render()}catch(e){t.innerHTML=`<tr><td colspan="5" style="color:var(--red);padding:24px">エラー: ${e.message}</td></tr>`}}
+async function loadImages(){try{const r=await api('/api/images');imageList=r.images||r;renderImageSelect()}catch(e){document.getElementById('newImage').innerHTML='<option value="__custom__">カスタム...</option>'}}
+function renderImageSelect(){const s=document.getElementById('newImage'),p=s.value;s.innerHTML=imageList.map(i=>`<option value="${esc(i.alias)}">${esc(i.alias)} - ${esc(i.description)}</option>`).join('')+'<option value="__custom__">カスタム...</option>';if(p&&[...s.options].some(o=>o.value===p))s.value=p}
+async function doRefreshImages(){const b=document.getElementById('refreshImagesBtn');b.disabled=true;b.textContent='確認中...';const w=toastWorking('新しいイメージを確認中...');try{const r=await api('/api/images/refresh',{method:'POST'});imageList=r.images||r;renderImageSelect();w.done(`${imageList.length} 個のイメージが見つかりました`)}catch(e){w.fail(`エラー: ${e.message}`)}finally{b.disabled=false;b.textContent='↻ 確認'}}
+function render(){const t=document.getElementById('instances');if(!instances.length){t.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:40px">インスタンスがありません</td></tr>';return}t.innerHTML=instances.map(i=>`<tr><td><span class="inst-name clickable" onclick="toggleOverview('${esc(i.name)}')">${esc(i.name)}</span></td><td>${statusBadge(i.status)}</td><td style="color:var(--text2);font-size:14px">${formatDate(i.created_at)}</td><td style="color:var(--text2);font-size:14px">${(i.profiles||[]).join(', ')}</td><td><div class="actions-cell">${i.status==='Running'?`<button class="btn btn-ghost btn-sm" onclick="openTerminal('${esc(i.name)}')" title="ターミナル">⬛ Term</button>`:''}${i.status==='Stopped'?`<button class="btn btn-ghost btn-sm" onclick="action('${i.name}','start')">起動</button>`:`<button class="btn btn-ghost btn-sm" onclick="action('${i.name}','stop')">停止</button>`}<button class="btn btn-ghost btn-sm" onclick="action('${i.name}','restart')">再起動</button><button class="btn btn-ghost btn-sm" onclick="showClone('${i.name}')">クローン</button><button class="btn btn-ghost btn-sm" onclick="showSnapshot('${i.name}')">スナップ</button><button class="btn btn-danger btn-sm" onclick="confirmAction('${i.name}','delete')">削除</button></div></td></tr><tr id="ov-${esc(i.name)}" class="overview-row" style="display:none"><td colspan="5">${renderOverview(i)}</td></tr><tr class="snap-row"><td colspan="5" style="padding:0 16px 8px">${renderSnapshots(i)}</td></tr>`).join('')}
+function renderSnapshots(i){const s=i.snapshots||[];if(!s.length)return'';return`<details class="snap-section"><summary>スナップショット (${s.length})</summary><div class="snap-list">${s.map(p=>`<div class="snap-item"><span class="snap-name">${esc(p.name)}</span><span class="snap-date">${formatDate(p.created_at)}</span><button class="btn btn-restore btn-sm btn-icon" onclick="confirmRestore('${i.name}','${esc(p.name)}')" title="復元">↺ 復元</button><button class="btn btn-danger btn-sm btn-icon" onclick="confirmDeleteSnap('${i.name}','${esc(p.name)}')" title="削除">×</button></div>`).join('')}</div></details>`}
+function toggleOverview(n){const r=document.getElementById('ov-'+n);if(!r)return;const o=r.style.display!=='none';document.querySelectorAll('.overview-row').forEach(r=>r.style.display='none');if(!o)r.style.display=''}
+function renderOverview(i){const net=(i.state&&i.state.network)||{},devices=i.devices||{},ips=[],mounts=[],gpus=[];for(const[f,info]of Object.entries(net)){if(f==='lo')continue;for(const a of(info.addresses||[])){if(a.family==='inet')ips.push({iface:f,addr:a.address,scope:a.scope})}}for(const[n,d]of Object.entries(devices)){if(d.type==='disk')mounts.push({name:n,source:d.source||'-',path:d.path||'-'});if(d.type==='gpu')gpus.push({name:n,pci:d.pci||'-',gputype:d.gputype||'physical'})}return`<div class="overview-panel"><div class="overview-section"><div class="overview-title">IP アドレス</div>${ips.length?ips.map(p=>`<div class="overview-item"><span class="overview-label">${esc(p.iface)}</span><span class="overview-value">${esc(p.addr)}</span><span class="overview-scope">${p.scope}</span></div>`).join(''):'<div class="overview-item overview-empty">IP なし（停止中）</div>'}</div><div class="overview-section"><div class="overview-title">マウントデバイス</div>${mounts.length?mounts.map(m=>`<div class="overview-item"><span class="overview-label">${esc(m.name)}</span><span class="overview-value">${esc(m.source)} → ${esc(m.path)}</span></div>`).join(''):'<div class="overview-item overview-empty">なし</div>'}</div><div class="overview-section"><div class="overview-title">GPU パススルー</div><div class="overview-item gpustat-link" onclick="showGpuModal('${esc(i.name)}')">${gpus.length?gpus.map(g=>`<span class="overview-label">${esc(g.name)}</span><span class="overview-value">${esc(g.gputype)} / ${esc(g.pci)}</span>`).join(''):'<span class="overview-empty">なし（クリックで設定）</span>'}</div></div></div>`}
+function esc(s){const e=document.createElement('span');e.textContent=s;return e.innerHTML}
+async function action(n,a){const labels={start:'起動',stop:'停止',restart:'再起動'};const w=toastWorking(`${labels[a]||a} ${n}...`);try{const r=await api(`/api/instances/${n}/${a}`,{method:'POST'});if(r.error)throw new Error(r.error);w.done(`${labels[a]||a}完了`);setTimeout(refresh,500)}catch(e){w.fail(`エラー: ${e.message}`)}}
+function updateCreateBtn(){const n=document.getElementById('newName').value.trim(),i=getSelectedImage();document.getElementById('createBtn').disabled=!n||!i}
+function updateOptsVisibility(){const i=getSelectedImage();document.getElementById('optsGroup').style.display=i.startsWith('ubuntu:')?'':'none'}
+function getSelectedImage(){const s=document.getElementById('newImage');return s.value==='__custom__'?document.getElementById('newImageCustom').value.trim():s.value}
+async function showCreate(){document.getElementById('newName').value='';document.getElementById('createBtn').disabled=true;document.getElementById('newImageCustom').style.display='none';if(!imageList.length)await loadImages();document.getElementById('newImage').value=imageList.length?imageList[0].alias:'__custom__';document.getElementById('newImageCustom').value='';updateOptsVisibility();updateCreateBtn();document.getElementById('createModal').classList.add('active')}
+document.getElementById('newName').addEventListener('input',updateCreateBtn);
+document.getElementById('newImage').addEventListener('change',()=>{const c=document.getElementById('newImage').value==='__custom__';document.getElementById('newImageCustom').style.display=c?'':'none';updateOptsVisibility();updateCreateBtn()});
+document.getElementById('newImageCustom').addEventListener('input',()=>{updateOptsVisibility();updateCreateBtn()});
+async function doCreate(){const n=document.getElementById('newName').value.trim(),i=getSelectedImage();if(!n||!i)return;const u=i.startsWith('ubuntu:'),b={name:n,image:i};if(u){b.update=document.getElementById('optUpdate').checked;b.tailscale=document.getElementById('optTailscale').checked;b.docker=document.getElementById('optDocker').checked;b.mount=document.getElementById('optMount').checked}closeModals();showCreateProgress(n);const logEl=document.getElementById('createProgressLog');try{const res=await fetch('/api/instances/create/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});if(!res.ok){const err=await res.json();throw new Error(err.error||'Create failed')}const reader=res.body.getReader();const decoder=new TextDecoder();let buffer='';while(true){const{done,value}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const lines=buffer.split('\n');buffer=lines.pop();for(const line of lines){if(line.startsWith('event:')){const evt=line.slice(6).trim()}else if(line.startsWith('data:')){try{const data=JSON.parse(line.slice(5));if(data.message)appendCreateLog(data.message)}catch(e){}}}}if(buffer.startsWith('data:')){try{const data=JSON.parse(buffer.slice(5));if(data.message)appendCreateLog(data.message)}catch(e){}}finishCreateProgress(true,'作成完了')}catch(e){appendCreateLog('エラー: '+e.message);finishCreateProgress(false,'エラー: '+e.message)}}
+function showCreateProgress(name){const panel=document.getElementById('createProgressPanel');panel.classList.add('active');document.getElementById('cpInstanceName').textContent=name;document.getElementById('createProgressLog').innerHTML='';document.getElementById('cpStatusText').textContent='作成中...';document.getElementById('cpSpinner').style.display=''}
+function appendCreateLog(msg){const log=document.getElementById('createProgressLog');const line=document.createElement('div');line.className='cp-log-line';const now=new Date().toLocaleTimeString('ja-JP');if(msg.includes('完了')||msg.includes('created')){line.className='cp-log-line log-success'}else if(msg.includes('エラー')||msg.includes('error')){line.className='cp-log-line log-error'}line.textContent='['+now+'] '+msg;log.appendChild(line);log.scrollTop=log.scrollHeight}
+function finishCreateProgress(success,msg){document.getElementById('cpStatusText').textContent=msg;document.getElementById('cpSpinner').style.display='none';if(success){refresh()}}
+function closeCreateProgress(){document.getElementById('createProgressPanel').classList.remove('active')}
+function showClone(n){document.getElementById('cloneSource').value=n;document.getElementById('cloneNewName').value='';document.getElementById('cloneModal').classList.add('active')}
+async function doClone(){const s=document.getElementById('cloneSource').value,n=document.getElementById('cloneNewName').value.trim();if(!n)return;closeModals();const w=toastWorking(`"${s}" を "${n}" にクローン中...`);try{const r=await api(`/api/instances/${s}/clone`,{method:'POST',body:{newName:n}});if(r.error)throw new Error(r.error);w.done(r.message||'クローンしました');refresh()}catch(e){w.fail(`エラー: ${e.message}`)}}
+function showSnapshot(n){document.getElementById('snapInstance').value=n;document.getElementById('snapComment').value='';document.getElementById('snapshotModal').classList.add('active')}
+async function doSnapshot(){const n=document.getElementById('snapInstance').value,c=document.getElementById('snapComment').value.trim();closeModals();const w=toastWorking(`"${n}" のスナップショットを作成中...`);try{const r=await api(`/api/instances/${n}/snapshots`,{method:'POST',body:{comment:c}});if(r.error)throw new Error(r.error);w.done(r.message||'スナップショットを作成しました');refresh()}catch(e){w.fail(`エラー: ${e.message}`)}}
+function confirmRestore(i,s){document.getElementById('confirmTitle').textContent='スナップショットの復元';document.getElementById('confirmMsg').innerHTML=`<span class="confirm-name">${esc(i)}</span> をスナップショット <span class="confirm-name">${esc(s)}</span> から復元しますか？<br>現在の状態は失われます。`;document.getElementById('confirmBtn').className='btn btn-restore';document.getElementById('confirmBtn').onclick=async()=>{closeModals();const w=toastWorking(`${i} を ${s} から復元中...`);try{const r=await api(`/api/instances/${i}/snapshots/${s}/restore`,{method:'POST'});if(r.error)throw new Error(r.error);w.done('復元しました');refresh()}catch(e){w.fail(`エラー: ${e.message}`)}};document.getElementById('confirmModal').classList.add('active')}
+function confirmDeleteSnap(i,s){document.getElementById('confirmTitle').textContent='スナップショットの削除';document.getElementById('confirmMsg').innerHTML=`<span class="confirm-name">${esc(i)}</span> のスナップショット <span class="confirm-name">${esc(s)}</span> を削除しますか？`;document.getElementById('confirmBtn').className='btn btn-danger';document.getElementById('confirmBtn').onclick=async()=>{closeModals();const w=toastWorking(`スナップショット ${s} を削除中...`);try{const r=await api(`/api/instances/${i}/snapshots/${s}`,{method:'DELETE'});if(r.error)throw new Error(r.error);w.done('削除しました');refresh()}catch(e){w.fail(`エラー: ${e.message}`)}};document.getElementById('confirmModal').classList.add('active')}
+function confirmAction(n,a){document.getElementById('confirmTitle').textContent='インスタンスの削除';document.getElementById('confirmMsg').innerHTML=`インスタンス <span class="confirm-name">${esc(n)}</span> を削除しますか？<br>この操作は取り消せません。`;document.getElementById('confirmBtn').className='btn btn-danger';document.getElementById('confirmBtn').onclick=async()=>{closeModals();const w=toastWorking(`${n} を削除中...`);try{const r=await api(`/api/instances/${n}/delete`,{method:'POST'});if(r.error)throw new Error(r.error);w.done('削除しました');refresh()}catch(e){w.fail(`エラー: ${e.message}`)}};document.getElementById('confirmModal').classList.add('active')}
+async function showGpuModal(instName){document.getElementById('gpuInstance').value=instName;document.getElementById('gpuCurrentList').innerHTML='<div class="overview-empty">読み込み中...</div>';document.getElementById('gpuAvailableList').innerHTML='<div class="overview-empty">読み込み中...</div>';document.getElementById('gpuModal').classList.add('active');try{const i=instances.find(x=>x.name===instName),d=(i&&i.devices)||{},gpus=Object.entries(d).filter(([,v])=>v.type==='gpu');document.getElementById('gpuCurrentList').innerHTML=gpus.length?gpus.map(([n,v])=>`<div class="gpu-item gpu-current"><span class="gpu-label">${esc(n)}</span><span class="gpu-desc">${esc(v.gputype||'physical')} / ${esc(v.pci||'all')}</span><span class="gpu-remove" onclick="confirmRemoveGpu('${esc(instName)}','${esc(n)}')">取り外す</span></div>`).join(''):'<div class="overview-empty">GPU がアタッチされていません</div>'}catch(e){document.getElementById('gpuCurrentList').innerHTML=`<div class="overview-empty">エラー: ${esc(e.message)}</div>`}try{const r=await api('/api/gpus'),gpus=r.gpus||[];document.getElementById('gpuAvailableList').innerHTML=gpus.length?gpus.map(g=>`<div class="gpu-item clickable" onclick="confirmAddGpu('${esc(instName)}','${esc(g.pci)}','${esc(g.desc)}')"><span class="gpu-desc">${esc(g.desc)}</span><span class="gpu-pci">${esc(g.pci)}</span></div>`).join(''):'<div class="overview-empty">ホストに GPU が検出されません</div>'}catch(e){document.getElementById('gpuAvailableList').innerHTML=`<div class="overview-empty">エラー: ${esc(e.message)}</div>`}}
+function confirmAddGpu(instName,pci,desc){document.getElementById('confirmTitle').textContent='GPU パススルーの追加';document.getElementById('confirmMsg').innerHTML=`GPU <span class="confirm-name">${esc(desc)}</span> (${esc(pci)}) を <span class="confirm-name">${esc(instName)}</span> に追加しますか？<br>GPU パススルーは即座に有効になります（再起動不要）。`;document.getElementById('confirmBtn').className='btn btn-danger';document.getElementById('confirmBtn').onclick=async()=>{closeModals();const w=toastWorking(`GPU を ${instName} に追加中...`);try{const r=await api(`/api/instances/${instName}/gpu/add`,{method:'POST',body:{pci}});if(r.error)throw new Error(r.error);w.done(r.message||'GPU を追加しました');refresh();setTimeout(()=>showGpuModal(instName),600)}catch(e){w.fail(`エラー: ${e.message}`)}};closeModals();document.getElementById('confirmModal').classList.add('active')}
+function confirmRemoveGpu(instName,deviceName){document.getElementById('confirmTitle').textContent='GPU パススルーの取り外し';document.getElementById('confirmMsg').innerHTML=`GPU デバイス <span class="confirm-name">${esc(deviceName)}</span> を <span class="confirm-name">${esc(instName)}</span> から取り外しますか？`;document.getElementById('confirmBtn').className='btn btn-danger';document.getElementById('confirmBtn').onclick=async()=>{closeModals();const w=toastWorking(`GPU を ${instName} から取り外し中...`);try{const r=await api(`/api/instances/${instName}/gpu/remove`,{method:'POST',body:{deviceName}});if(r.error)throw new Error(r.error);w.done('GPU を取り外しました');refresh();setTimeout(()=>showGpuModal(instName),600)}catch(e){w.fail(`エラー: ${e.message}`)}};closeModals();document.getElementById('confirmModal').classList.add('active')}
+function closeModals(){document.querySelectorAll('.modal-overlay').forEach(m=>m.classList.remove('active'))}
+document.querySelectorAll('.modal-overlay').forEach(m=>{m.addEventListener('click',e=>{if(e.target===m)closeModals()})});
+
+// --- Terminal (xterm.js + WebSocket) ---
+let term=null, termWs=null, termAddonFit=null;
+function openTerminal(name){
+  if(termWs){termWs.close();termWs=null}
+  if(term){term.dispose();term=null}
+  const panel=document.getElementById('terminalPanel');
+  panel.classList.add('active');
+  document.getElementById('termInstanceName').textContent=name;
+  const container=document.getElementById('terminalContainer');
+  container.innerHTML='';
+  term=new Terminal({cursorBlink:true,fontSize:14,fontFamily:"'SF Mono',Consolas,'Courier New',monospace",theme:{background:'#0d1117',foreground:'#c9d1d9',cursor:'#58a6ff',selectionBackground:'rgba(56,139,253,0.4)',black:'#0d1117',red:'#f85149',green:'#3fb950',yellow:'#d29922',blue:'#58a6ff',magenta:'#bc8cff',cyan:'#39c5cf',white:'#c9d1d9',brightBlack:'#6e7681',brightRed:'#f85149',brightGreen:'#3fb950',brightYellow:'#d29922',brightBlue:'#58a6ff',brightMagenta:'#bc8cff',brightCyan:'#56d4dd',brightWhite:'#f0f6fc'}});
+  termAddonFit=new FitAddon.FitAddon();
+  term.loadAddon(termAddonFit);
+  term.open(container);
+  requestAnimationFrame(()=>{termAddonFit.fit();connectTermWs(name)});
+}
+function connectTermWs(name){
+  const proto=location.protocol==='https:'?'wss:':'ws:';
+  termWs=new WebSocket(`${proto}//${location.host}/ws/terminal?instance=${encodeURIComponent(name)}&cols=${term.cols}&rows=${term.rows}`);
+  term.onData(d=>{if(termWs&&termWs.readyState===WebSocket.OPEN)termWs.send(JSON.stringify({type:'input',data:d}))});
+  term.onResize(({cols,rows})=>{if(termWs&&termWs.readyState===WebSocket.OPEN)termWs.send(JSON.stringify({type:'resize',cols,rows}))});
+  termWs.onmessage=e=>{try{const m=JSON.parse(e.data);if(m.type==='output')term.write(m.data);if(m.type==='exit')term.write('\r\n[セッション終了]\r\n')}catch(ex){}};
+  termWs.onclose=()=>{if(term)term.write('\r\n[接続が切断されました]\r\n')};
+}
+function termFit(){
+  if(termAddonFit&&term){
+    termAddonFit.fit();
+    if(termWs&&termWs.readyState===WebSocket.OPEN){
+      termWs.send(JSON.stringify({type:'resize',cols:term.cols,rows:term.rows}));
+    }
+  }
+}
+async function resetTerminal(){
+  const name=document.getElementById('termInstanceName').textContent;
+  if(!name)return;
+  try{await fetch(`/api/terminal/reset/${encodeURIComponent(name)}`,{method:'POST'})}catch(e){}
+  if(termWs){termWs.close();termWs=null}
+  if(term){term.dispose();term=null}
+  termAddonFit=null;
+  openTerminal(name);
+}
+function closeTerminal(){
+  document.getElementById('terminalPanel').classList.remove('active');
+  if(termWs){termWs.close();termWs=null}
+  if(term){term.dispose();term=null}
+  termAddonFit=null;
+}
+(function(){
+  const handle=document.getElementById('termDragHandle');
+  const panel=document.getElementById('terminalPanel');
+  let dragging=false,startY=0,startH=0;
+  handle.addEventListener('mousedown',e=>{
+    dragging=true;startY=e.clientY;startH=panel.offsetHeight;
+    document.body.style.cursor='ns-resize';document.body.style.userSelect='none';
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove',e=>{
+    if(!dragging)return;
+    const h=Math.max(100,Math.min(window.innerHeight-50,startH+(startY-e.clientY)));
+    panel.style.height=h+'px';
+    if(termAddonFit&&term)termAddonFit.fit();
+  });
+  document.addEventListener('mouseup',()=>{
+    if(!dragging)return;dragging=false;
+    document.body.style.cursor='';document.body.style.userSelect='';
+  });
+})();
+
+refresh();loadImages();
+</script>
+</body>
+</html>
