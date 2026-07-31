@@ -1,1 +1,137 @@
-# easylxd
+# Easy LXD UI
+
+LXD インスタンスをブラウザから管理するための Web UI です。
+
+- インスタンスの一覧 / 起動・停止・再起動・削除
+- インスタンス作成（Ubuntu / カスタムイメージ対応）
+  - apt アップデート、Tailscale、Docker、/opt/lxd-data マウント をワンクリックで設定
+- Web ターミナル（xterm.js + WebSocket + PTY）
+- スナップショット作成・復元・削除
+- クローン
+- GPU パススルー
+
+---
+
+## 必要要件
+
+- Ubuntu（または systemd が動く Linux）
+- LXD がインストール済みで、`lxc` コマンドが使えること
+- Tailscale がインストール済みで、ログイン済みであること
+- root 権限
+- インターネット接続
+
+自動でインストールされるもの:
+
+- Node.js / npm
+- build-essential, python3（node-pty のビルド用）
+- pciutils（GPU 一覧の取得用）
+
+---
+
+## インストール
+
+インストールスクリプトをダウンロードして実行します。
+
+```bash
+curl -fsSL -o /tmp/install-easylxd1.sh \
+  https://raw.githubusercontent.com/hirogura/easylxd/main/install-easylxd1.sh
+chmod +x /tmp/install-easylxd1.sh
+/tmp/install-easylxd1.sh
+```
+
+> 注意: スクリプトの実行前に、スクリプトの内容を確認してください。
+
+インストール完了時には、以下が表示されます。
+
+```bash
+=== インストール完了 ===
+  Node:  /usr/bin/node (v20.11.0)
+  URL:   https://<マシン名>.ts.net:3329  (Tailnet内のみ)
+  Dir:   /opt/easy-lxd
+```
+
+---
+
+## アクセス方法
+
+- Tailscale ネットワーク（Tailnet）内のブラウザから、インストール完了時に表示された URL にアクセスします。
+  - 例: `https://<マシン名>.ts.net:3329`
+- URL が分からなくなった場合は、サーバー上で以下を実行して確認できます。
+
+  ```bash
+  tailscale serve status
+  tailscale status
+  ```
+
+---
+
+## 公開範囲について
+
+**Tailnet 内のみに公開されます。** アプリ本体は `127.0.0.1:3329` でのみ待ち受け、
+Tailscale Serve 経由で Tailscale ネットワーク（Tailnet）内に HTTPS で公開されます。
+LAN やインターネットには公開されません。
+
+---
+
+## インストール内容
+
+| 項目 | 場所 |
+|------|------|
+| アプリ本体（サーバー + Web UI） | `/opt/easy-lxd/` |
+| npm 依存パッケージ | `/opt/easy-lxd/node_modules/` |
+| データ共有ディレクトリ（コンテナへマウント） | `/opt/lxd-data/` |
+| systemd サービス | `/etc/systemd/system/easy-lxd.service` |
+
+---
+
+## 管理コマンド
+
+### サービスの状態確認・再起動
+
+```bash
+systemctl status easy-lxd
+systemctl restart easy-lxd
+```
+
+### アップデート（最新版へ更新）
+
+インストールスクリプトを再実行すると、GitHub から最新版を取得して上書きし、
+npm パッケージを更新したうえでサービスを再起動します。
+
+```bash
+curl -fsSL -o /tmp/install-easylxd1.sh \
+  https://raw.githubusercontent.com/hirogura/easylxd/main/install-easylxd1.sh
+chmod +x /tmp/install-easylxd1.sh
+/tmp/install-easylxd1.sh
+```
+
+### アンインストール
+
+```bash
+systemctl stop easy-lxd
+systemctl disable easy-lxd
+rm /etc/systemd/system/easy-lxd.service
+systemctl daemon-reload
+rm -rf /opt/easy-lxd
+```
+
+> 注意: `/opt/lxd-data` はコンテナと共有しているデータのため、削除しません。
+
+---
+
+## ポート
+
+- アプリ本体: `3329`（127.0.0.1 のみ）
+- Tailscale Serve: `https://<マシン名>.ts.net:3329`
+
+ポートを変更したい場合は `install-easylxd1.sh` 内の `PORT` を変更してください。
+
+---
+
+## 補足
+
+### /opt/lxd-data について
+
+インスタンス作成時に「/opt/lxd-data マウント」を有効にすると、
+コンテナ内の `/opt/lxd-data` にホストの `/opt/lxd-data` がマウントされ、
+UID/GID 1000 で共有されます。
