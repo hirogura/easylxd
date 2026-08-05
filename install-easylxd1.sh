@@ -15,6 +15,35 @@ if ! command -v curl &>/dev/null; then
   apt-get install -y curl
 fi
 
+# --- LXD ---
+if command -v lxc &>/dev/null; then
+  echo "LXD: $(lxc version 2>/dev/null || lxc --version)"
+else
+  echo ""
+  echo "LXD がインストールされていません。"
+  read -rp "先に LXD をインストールしますか？ [y/N]: " INSTALL_LXD
+  case "$INSTALL_LXD" in
+    [yY]|[yY][eE][sS])
+      echo "LXD セットアップスクリプトを取得中..."
+      LXD_SETUP="/tmp/lxd-setup.sh"
+      curl -fsSL -o "$LXD_SETUP" "${REPO_URL/github.com/raw.githubusercontent.com}/${GIT_BRANCH}/lxd-setup.sh"
+      chmod +x "$LXD_SETUP"
+      echo "LXD セットアップを実行します..."
+      "$LXD_SETUP"
+      export PATH="/snap/bin:$PATH"
+      if ! command -v lxc &>/dev/null; then
+        echo "ERROR: LXD のインストール後に lxc コマンドが見つかりません。一度ログインし直してから再実行してください。"
+        exit 1
+      fi
+      echo "LXD: $(lxc version 2>/dev/null || lxc --version)"
+      ;;
+    *)
+      echo "LXD がインストールされていないため、EasyLXD をインストールできません。中止します。"
+      exit 1
+      ;;
+  esac
+fi
+
 # --- Node.js ---
 NODE_PATH=""
 if command -v node &>/dev/null; then
@@ -50,7 +79,8 @@ if ! dpkg -s build-essential &>/dev/null 2>&1; then
   apt-get install -y build-essential python3
 fi
 
-# --- lxc ---
+# --- lxc (再確認) ---
+export PATH="/snap/bin:$PATH"
 command -v lxc &>/dev/null || { echo "ERROR: lxc is not installed"; exit 1; }
 echo "LXC: $(lxc version 2>/dev/null || lxc --version)"
 
