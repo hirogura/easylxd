@@ -11,10 +11,14 @@ echo ""
 
 # --- LXD UI の有効化確認 ---
 ENABLE_LXD_UI="false"
-read -rp "LXD UI を有効にしますか？ [y/N]: " LXD_UI_ANSWER
-case "$LXD_UI_ANSWER" in
-  [yY]|[yY][eE][sS]) ENABLE_LXD_UI="true" ;;
-esac
+if [ -t 0 ]; then
+  read -rp "LXD UI を有効にしますか？ [y/N]: " LXD_UI_ANSWER
+  case "$LXD_UI_ANSWER" in
+    [yY]|[yY][eE][sS]) ENABLE_LXD_UI="true" ;;
+  esac
+else
+  echo "LXD UI: 非対話モードのためスキップ（デフォルト: 無効）"
+fi
 
 # --- curl (GitHubからの取得に必要) ---
 if ! command -v curl &>/dev/null; then
@@ -28,7 +32,12 @@ if command -v lxc &>/dev/null; then
 else
   echo ""
   echo "LXD がインストールされていません。"
-  read -rp "先に LXD をインストールしますか？ [y/N]: " INSTALL_LXD
+  if [ -t 0 ]; then
+    read -rp "先に LXD をインストールしますか？ [y/N]: " INSTALL_LXD
+  else
+    echo "非対話モードのため LXD の自動インストールをスキップします。"
+    INSTALL_LXD="n"
+  fi
   case "$INSTALL_LXD" in
     [yY]|[yY][eE][sS])
       echo "LXD セットアップスクリプトを取得中..."
