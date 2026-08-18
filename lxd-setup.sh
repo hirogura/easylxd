@@ -4,9 +4,6 @@ set -euo pipefail
 # ============================================================
 # LXD セットアップスクリプト
 # 何度実行しても安全。既に設定済みの項目はスキップします。
-#
-# 環境変数:
-#   ENABLE_LXD_UI=true で LXD UI を有効化（デフォルト: 無効）
 # ============================================================
 
 LXD_POOL_DIR="/opt/lxd-pool"
@@ -60,23 +57,7 @@ else
 fi
 
 # ------------------------------------------------------------
-# 5. LXD UI を有効化
-# ------------------------------------------------------------
-if [ "${ENABLE_LXD_UI:-false}" = "true" ]; then
-  CURRENT_UI=$(snap get lxd ui.enable 2>/dev/null || echo "false")
-  if [ "$CURRENT_UI" = "true" ]; then
-    echo "[SKIP] LXD UI は既に有効です"
-  else
-    echo "[RUN]  LXD UI を有効化します..."
-    sudo snap set lxd ui.enable=true
-    sudo systemctl reload snap.lxd.daemon
-  fi
-else
-  echo "[SKIP] LXD UI はスキップしました（ENABLE_LXD_UI が未設定または false）"
-fi
-
-# ------------------------------------------------------------
-# 6. ユーザーを lxd グループに追加
+# 5. ユーザーを lxd グループに追加
 # ------------------------------------------------------------
 if id -nG "$USER" | grep -qw lxd; then
   echo "[SKIP] $USER は既に lxd グループのメンバーです"

@@ -49,7 +49,6 @@ chmod +x /tmp/lxd-setup.sh
 - `lxd init --minimal` による初期化
 - ストレージプールを `/opt/lxd-pool` に変更
 - HTTPS API の有効化（`:8443`）
-- LXD UI の有効化
 - 実行ユーザーを `lxd` グループに追加
 
 **完了後、一度再起動してから次の手順に進んでください。**

@@ -9,17 +9,6 @@ GIT_BRANCH="main"
 echo "=== Easy LXD UI Installer v1 (GitHub版) ==="
 echo ""
 
-# --- LXD UI の有効化確認 ---
-ENABLE_LXD_UI="false"
-if [ -t 0 ]; then
-  read -rp "LXD UI を有効にしますか？ [y/N]: " LXD_UI_ANSWER
-  case "$LXD_UI_ANSWER" in
-    [yY]|[yY][eE][sS]) ENABLE_LXD_UI="true" ;;
-  esac
-else
-  echo "LXD UI: 非対話モードのためスキップ（デフォルト: 無効）"
-fi
-
 # --- curl (GitHubからの取得に必要) ---
 if ! command -v curl &>/dev/null; then
   echo "curl をインストールします..."
@@ -45,7 +34,7 @@ else
       curl -fsSL -o "$LXD_SETUP" "${REPO_URL/github.com/raw.githubusercontent.com}/${GIT_BRANCH}/lxd-setup.sh"
       chmod +x "$LXD_SETUP"
       echo "LXD セットアップを実行します..."
-      ENABLE_LXD_UI="$ENABLE_LXD_UI" "$LXD_SETUP"
+      "$LXD_SETUP"
       export PATH="/snap/bin:$PATH"
       if ! command -v lxc &>/dev/null; then
         echo "ERROR: LXD のインストール後に lxc コマンドが見つかりません。一度ログインし直してから再実行してください。"
