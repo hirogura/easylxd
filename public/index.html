@@ -166,19 +166,19 @@ async function doServerUpdate(){
 }
 function confirmServerReboot(){
   document.getElementById('confirmTitle').textContent='サーバ再起動';
-  document.getElementById('confirmMsg').innerHTML=`EasyLXD ホストを再起動しますか？<br>すべてのインスタンスが停止し、UI も一時的に切断されます。`;
+  document.getElementById('confirmMsg').innerHTML=`EasyLXD サービスを再起動しますか？<br>インスタンスは停止しませんが、UI は一時的に切断されます。`;
   document.getElementById('confirmBtn').className='btn btn-danger';
   document.getElementById('confirmBtn').onclick=async()=>{closeModals();await doServerReboot()};
   document.getElementById('confirmModal').classList.add('active');
 }
 async function doServerReboot(){
-  const w=toastWorking('サーバを再起動中...');
+  const w=toastWorking('EasyLXD サービスを再起動中...');
   try{
     const r=await api('/api/server/reboot',{method:'POST'});
     if(r.error)throw new Error(r.error);
     w.remove();
     const ov=document.createElement('div');ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:400;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;color:var(--text);font-size:15px';
-    ov.innerHTML='<div class="spinner" style="width:32px;height:32px;border-width:3px"></div><div>サーバを再起動中です。起動が完了すると自動的に再読み込みされます。</div>';
+    ov.innerHTML='<div class="spinner" style="width:32px;height:32px;border-width:3px"></div><div>EasyLXD サービスを再起動中です。起動が完了すると自動的に再読み込みされます。</div>';
     document.body.appendChild(ov);
     const iv=setInterval(async()=>{try{const r=await fetch('/api/instances');if(r.ok){clearInterval(iv);location.reload()}}catch(e){}},5000);
   }catch(e){w.fail(`エラー: ${e.message}`)}

@@ -497,9 +497,9 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname === '/api/server/reboot' && req.method === 'POST') {
     setTimeout(() => {
-      try { const c = spawn('systemctl', ['reboot'], { stdio: 'ignore', detached: true }); c.unref(); } catch (e) {}
+      try { const c = spawn('systemctl', ['restart', 'easy-lxd'], { stdio: 'ignore', detached: true }); c.unref(); } catch (e) {}
     }, 500);
-    return json(res, 200, { ok: true, message: 'Host reboot scheduled' });
+    return json(res, 200, { ok: true, message: 'EasyLXD service restart scheduled' });
   }
 
   const termResetMatch = pathname.match(/^\/api\/terminal\/reset\/(.+)$/);
