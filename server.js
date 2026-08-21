@@ -170,28 +170,9 @@ async function createInstance(opts, progress) {
   await waitRunning(name);
   log('起動完了');
 
-  if (isUbuntu && (doUpdate || tailscale || docker)) {
-    log('ネットワーク疎通(DNS解決)を確認中...');
-    const net = await waitNetworkReady(name, 30);
-    log(net.ok
-      ? `ネットワーク疎通を確認しました (${net.waited}秒)`
-      : `WARNING: ネットワーク疎通が${net.waited}秒以内に確認できませんでした（続行しますが、update/tailscale/dockerが失敗する可能性があります）`);
-  }
-
-  if (isUbuntu && doUpdate) {
-    log('apt-get update && upgrade 実行中...');
-    await lxcExec(name, 'apt-get update && apt-get upgrade -y', 600000, streamToLog(log));
-    log('アップデート完了');
-  }
-  if (isUbuntu && tailscale) {
-    log('Tailscale インストール中...');
-    await lxcExec(name, 'curl -fsSL https://tailscale.com/install.sh | sh -s -- --no-autostart', 300000, streamToLog(log));
-    log('Tailscale インストール完了');
-  }
-  // マウントは Docker より先に必ず実行する。
-  // (Docker のインストールが失敗/タイムアウトして例外を投げると、後続処理が
-  //  一切実行されないため、マウントが Docker の後にあると「マウントされない」
-  //  という症状になっていた。)
+  // マウントはネットワークに依存しないため最初に必ず実行する。
+  // (疎通がない環境では apt-get update 等が失敗して例外で中断され、
+  //  マウント処理まで到達しないという症状になっていた。)
   if (isUbuntu && mount) {
     log('/opt/lxd-data マウント設定中...');
     try {
@@ -210,6 +191,33 @@ async function createInstance(opts, progress) {
       log(`/opt/lxd-data 確認できませんでした: ${e.message}`);
     }
     log('マウント設定完了');
+  }
+
+  if (isUbuntu && (doUpdate || tailscale || docker)) {
+    log('ネットワーク疎通(DNS解決)を確認中...');
+    const net = await waitNetworkReady(name, 30);
+    log(net.ok
+      ? `ネットワーク疎通を確認しました (${net.waited}秒)`
+      : `WARNING: ネットワーク疎通が${net.waited}秒以内に確認できませんでした（続行しますが、update/tailscale/dockerが失敗する可能性があります）`);
+  }
+
+  if (isUbuntu && doUpdate) {
+    try {
+      log('apt-get update && upgrade 実行中...');
+      await lxcExec(name, 'apt-get update && apt-get upgrade -y', 600000, streamToLog(log));
+      log('アップデート完了');
+    } catch (e) {
+      log(`WARNING: アップデートに失敗しました（作成は継続します）: ${e.message}`);
+    }
+  }
+  if (isUbuntu && tailscale) {
+    try {
+      log('Tailscale インストール中...');
+      await lxcExec(name, 'curl -fsSL https://tailscale.com/install.sh | sh -s -- --no-autostart', 300000, streamToLog(log));
+      log('Tailscale インストール完了');
+    } catch (e) {
+      log(`WARNING: Tailscale インストールに失敗しました（作成は継続します）: ${e.message}`);
+    }
   }
   if (isUbuntu && docker) {
     log('Docker インストール準備中 (security.nesting)...');
