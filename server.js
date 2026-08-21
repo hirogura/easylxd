@@ -482,7 +482,10 @@ const server = http.createServer(async (req, res) => {
       'trap \'rm -f "$TMP"\' EXIT',
       `curl -fsSL -o "$TMP" ${SETUP_SCRIPT_URL}`,
       'chmod +x "$TMP"',
-      '"$TMP"'
+      // --skip-pool: サーバアップデート時はプール関連の処理をスキップする。
+      // default プールが /opt/lxd-pool 以外の環境でスクリプトを再実行すると
+      // 既存プールの削除・再作成が走ってエラーになるため（初回インストール時のみ変更する）。
+      '"$TMP" --skip-pool'
     ].join('\n');
     try {
       send('log', { message: `最新のセットアップスクリプトをダウンロード中... (${SETUP_SCRIPT_URL})` });

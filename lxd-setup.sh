@@ -9,6 +9,26 @@ set -euo pipefail
 LXD_POOL_DIR="/opt/lxd-pool"
 
 # ------------------------------------------------------------
+# オプション解析
+#   --skip-pool : ストレージプール関連の処理(6./7.)をスキップする。
+#                 サーバアップデート時に UI から実行される場合に指定され、
+#                 default プールが /opt/lxd-pool 以外の既存環境で
+#                 プールの削除・再作成が走ってエラー/データ破壊になるのを防ぐ。
+#                 初回インストール時は指定しないため従来通りプールを変更する。
+# ------------------------------------------------------------
+SKIP_POOL=false
+for arg in "$@"; do
+  case "$arg" in
+    --skip-pool) SKIP_POOL=true ;;
+    *)
+      echo "ERROR: 不明なオプション: $arg"
+      echo "使い方: $0 [--skip-pool]"
+      exit 1
+      ;;
+  esac
+done
+
+# ------------------------------------------------------------
 # 1. LXD インストール（導入済みなら確実に検出してスキップ）
 #    Ubuntu Server は lxd snap がプリインストールされているため、
 #    /snap/bin が PATH 外の非ログインシェルでも取りこぼさないよう
@@ -89,30 +109,36 @@ fi
 # ------------------------------------------------------------
 # 6. ストレージプールを /opt/lxd-pool に変更
 #    （default プールが無い状態でも必ず作成する）
+#    --skip-pool 指定時（サーバアップデート時）はスキップ。
 # ------------------------------------------------------------
-sudo mkdir -p "$LXD_POOL_DIR"
-
-CURRENT_SOURCE=$(sudo lxc storage get default source 2>/dev/null || echo "")
-if [ "$CURRENT_SOURCE" = "$LXD_POOL_DIR" ]; then
-  echo "[SKIP] Storage pool は既に $LXD_POOL_DIR を向いています"
+if [ "$SKIP_POOL" = true ]; then
+  echo "[SKIP] サーバアップデートのためストレージプールの変更をスキップします"
 else
-  echo "[RUN]  Storage pool を $LXD_POOL_DIR に変更します..."
-  if sudo lxc storage show default &>/dev/null; then
-    # default プールを参照しているプロファイルデバイスを先に外す
-    sudo lxc profile device remove default root 2>/dev/null || true
-    sudo lxc storage delete default
+  sudo mkdir -p "$LXD_POOL_DIR"
+
+  CURRENT_SOURCE=$(sudo lxc storage get default source 2>/dev/null || echo "")
+  if [ "$CURRENT_SOURCE" = "$LXD_POOL_DIR" ]; then
+    echo "[SKIP] Storage pool は既に $LXD_POOL_DIR を向いています"
+  else
+    echo "[RUN]  Storage pool を $LXD_POOL_DIR に変更します..."
+    if sudo lxc storage show default &>/dev/null; then
+      # default プールを参照しているプロファイルデバイスを先に外す
+      sudo lxc profile device remove default root 2>/dev/null || true
+      sudo lxc storage delete default
+    fi
+    sudo lxc storage create default dir source="$LXD_POOL_DIR"
   fi
-  sudo lxc storage create default dir source="$LXD_POOL_DIR"
-fi
 
-# ------------------------------------------------------------
-# 7. default プロファイルへの root ディスク割り当てを保証
-# ------------------------------------------------------------
-if sudo lxc profile device list default 2>/dev/null | grep -qw "root"; then
-  echo "[SKIP] default プロファイルには root ディスクが設定済みです"
-else
-  echo "[RUN]  default プロファイルに root ディスクを追加します..."
-  sudo lxc profile device add default root disk path=/ pool=default
+  # ------------------------------------------------------------
+  # 7. default プロファイルへの root ディスク割り当てを保証
+  #    （プール名に依存するため --skip-pool 時は上と合わせてスキップ）
+  # ------------------------------------------------------------
+  if sudo lxc profile device list default 2>/dev/null | grep -qw "root"; then
+    echo "[SKIP] default プロファイルには root ディスクが設定済みです"
+  else
+    echo "[RUN]  default プロファイルに root ディスクを追加します..."
+    sudo lxc profile device add default root disk path=/ pool=default
+  fi
 fi
 
 # ------------------------------------------------------------
