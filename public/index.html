@@ -94,10 +94,10 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(91,138,245,.04)}
 </style>
 </head>
 <body>
-<div class="header"><div><h1>Easy LXD</h1><div class="subtitle">LXD インスタンス管理</div></div><div class="actions"><button class="btn btn-ghost btn-sm" onclick="refresh()">更新</button><button class="btn btn-primary" onclick="showCreate()">+ 新規インスタンス</button></div></div>
+<div class="header"><div><h1>Easy LXD</h1><div class="subtitle">LXD インスタンス管理</div></div><div class="actions"><button class="btn btn-ghost btn-sm" id="serverUpdateBtn" onclick="confirmServerUpdate()">サーバアップデート</button><button class="btn btn-danger btn-sm" onclick="confirmServerReboot()">サーバ再起動</button><button class="btn btn-ghost btn-sm" onclick="refresh()">更新</button><button class="btn btn-primary" onclick="showCreate()">+ 新規インスタンス</button></div></div>
 <div class="container"><div class="table-wrap"><table><thead><tr><th>名前</th><th>状態</th><th>作成日</th><th>プロファイル</th><th>操作</th></tr></thead><tbody id="instances"></tbody></table></div></div>
 <div id="terminalPanel"><div id="termDragHandle"></div><div class="terminal-bar"><span class="term-title">ターミナル — <span id="termInstanceName"></span></span><div class="term-actions"><button class="btn btn-ghost btn-sm" onclick="resetTerminal()" title="セッションをリセット">⟳ リセット</button><button class="btn btn-ghost btn-sm" onclick="termFit()" title="画面に合わせる">FIT</button><button class="btn btn-ghost btn-sm" onclick="closeTerminal()">✕ 閉じる</button></div></div><div id="terminalContainer"></div></div>
-<div class="create-progress-panel" id="createProgressPanel"><div class="create-progress-header"><span class="cp-title">インスタンス作成 — <span id="cpInstanceName"></span></span><div class="cp-status"><div class="spinner" id="cpSpinner"></div><span id="cpStatusText">作成中...</span><button class="cp-close" onclick="closeCreateProgress()" title="閉じる">&times;</button></div></div><div id="createProgressLog"></div></div>
+<div class="create-progress-panel" id="createProgressPanel"><div class="create-progress-header"><span class="cp-title"><span id="cpPanelTitle">インスタンス作成</span> — <span id="cpInstanceName"></span></span><div class="cp-status"><div class="spinner" id="cpSpinner"></div><span id="cpStatusText">作成中...</span><button class="cp-close" onclick="closeCreateProgress()" title="閉じる">&times;</button></div></div><div id="createProgressLog"></div></div>
 <div class="modal-overlay" id="createModal"><div class="modal"><div class="modal-header"><h2>インスタンス作成</h2><button class="modal-close" onclick="closeModals()">&times;</button></div><div class="modal-body"><div class="form-group"><label>インスタンス名</label><input type="text" id="newName" placeholder="例: my-server" pattern="[a-zA-Z0-9_-]+"></div><div class="form-group"><label>イメージ</label><div class="image-row"><select id="newImage"><option value="">読み込み中...</option></select><button class="btn btn-ghost btn-sm" id="refreshImagesBtn" onclick="doRefreshImages()" title="新しいイメージを確認">↻ 確認</button></div><input type="text" id="newImageCustom" placeholder="例: ubuntu:24.04, debian:12, alpine/3.18" style="display:none;margin-top:8px"></div><div class="form-group" id="optsGroup" style="display:none"><label>オプション</label><label class="checkbox-label"><input type="checkbox" id="optUpdate" checked> アップデート (apt upgrade)</label><label class="checkbox-label"><input type="checkbox" id="optTailscale" checked> Tailscale</label><label class="checkbox-label"><input type="checkbox" id="optDocker"> Docker</label><label class="checkbox-label"><input type="checkbox" id="optMount" checked> /opt/lxd-data マウント</label></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModals()">キャンセル</button><button class="btn btn-primary" id="createBtn" onclick="doCreate()" disabled>作成</button></div></div></div>
 <div class="modal-overlay" id="cloneModal"><div class="modal"><div class="modal-header"><h2>インスタンスのクローン</h2><button class="modal-close" onclick="closeModals()">&times;</button></div><div class="modal-body"><div class="form-group"><label>ソース</label><input type="text" id="cloneSource" readonly></div><div class="form-group"><label>新しいインスタンス名</label><input type="text" id="cloneNewName" placeholder="例: my-server-copy"></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModals()">キャンセル</button><button class="btn btn-primary" id="cloneBtn" onclick="doClone()">クローン</button></div></div></div>
 <div class="modal-overlay" id="snapshotModal"><div class="modal"><div class="modal-header"><h2>スナップショット作成</h2><button class="modal-close" onclick="closeModals()">&times;</button></div><div class="modal-body"><div class="form-group"><label>インスタンス</label><input type="text" id="snapInstance" readonly></div><div class="form-group"><label>コメント（任意）</label><input type="text" id="snapComment" placeholder="例: before-update"></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModals()">キャンセル</button><button class="btn btn-primary" id="snapBtn" onclick="doSnapshot()">作成</button></div></div></div>
@@ -128,10 +128,61 @@ document.getElementById('newName').addEventListener('input',updateCreateBtn);
 document.getElementById('newImage').addEventListener('change',()=>{const c=document.getElementById('newImage').value==='__custom__';document.getElementById('newImageCustom').style.display=c?'':'none';updateOptsVisibility();updateCreateBtn()});
 document.getElementById('newImageCustom').addEventListener('input',()=>{updateOptsVisibility();updateCreateBtn()});
 async function doCreate(){const n=document.getElementById('newName').value.trim(),i=getSelectedImage();if(!n||!i)return;const u=i.startsWith('ubuntu:'),b={name:n,image:i};if(u){b.update=document.getElementById('optUpdate').checked;b.tailscale=document.getElementById('optTailscale').checked;b.docker=document.getElementById('optDocker').checked;b.mount=document.getElementById('optMount').checked}closeModals();showCreateProgress(n);const logEl=document.getElementById('createProgressLog');try{const res=await fetch('/api/instances/create/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});if(!res.ok){const err=await res.json();throw new Error(err.error||'Create failed')}const reader=res.body.getReader();const decoder=new TextDecoder();let buffer='';while(true){const{done,value}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const lines=buffer.split('\n');buffer=lines.pop();for(const line of lines){if(line.startsWith('event:')){const evt=line.slice(6).trim()}else if(line.startsWith('data:')){try{const data=JSON.parse(line.slice(5));if(data.message)appendCreateLog(data.message)}catch(e){}}}}if(buffer.startsWith('data:')){try{const data=JSON.parse(buffer.slice(5));if(data.message)appendCreateLog(data.message)}catch(e){}}finishCreateProgress(true,'作成完了')}catch(e){appendCreateLog('エラー: '+e.message);finishCreateProgress(false,'エラー: '+e.message)}}
-function showCreateProgress(name){const panel=document.getElementById('createProgressPanel');panel.classList.add('active');document.getElementById('cpInstanceName').textContent=name;document.getElementById('createProgressLog').innerHTML='';document.getElementById('cpStatusText').textContent='作成中...';document.getElementById('cpSpinner').style.display=''}
+function showCreateProgress(name){const panel=document.getElementById('createProgressPanel');panel.classList.add('active');document.getElementById('cpPanelTitle').textContent='インスタンス作成';document.getElementById('cpInstanceName').textContent=name;document.getElementById('createProgressLog').innerHTML='';document.getElementById('cpStatusText').textContent='作成中...';document.getElementById('cpSpinner').style.display=''}
 function appendCreateLog(msg){const log=document.getElementById('createProgressLog');const line=document.createElement('div');line.className='cp-log-line';const now=new Date().toLocaleTimeString('ja-JP');if(msg.includes('完了')||msg.includes('created')){line.className='cp-log-line log-success'}else if(msg.includes('エラー')||msg.includes('error')){line.className='cp-log-line log-error'}line.textContent='['+now+'] '+msg;log.appendChild(line);log.scrollTop=log.scrollHeight}
 function finishCreateProgress(success,msg){document.getElementById('cpStatusText').textContent=msg;document.getElementById('cpSpinner').style.display='none';if(success){refresh()}}
 function closeCreateProgress(){document.getElementById('createProgressPanel').classList.remove('active')}
+function confirmServerUpdate(){
+  document.getElementById('confirmTitle').textContent='サーバアップデート';
+  document.getElementById('confirmMsg').innerHTML=`EasyLXD ホストに対して最新の <span class="confirm-name">lxd-setup.sh</span> をダウンロードして実行しますか？<br>完了後はサーバの再起動が必要です。`;
+  document.getElementById('confirmBtn').className='btn btn-primary';
+  document.getElementById('confirmBtn').onclick=()=>{closeModals();doServerUpdate()};
+  document.getElementById('confirmModal').classList.add('active');
+}
+async function doServerUpdate(){
+  const b=document.getElementById('serverUpdateBtn');b.disabled=true;
+  const panel=document.getElementById('createProgressPanel');panel.classList.add('active');
+  document.getElementById('cpPanelTitle').textContent='サーバアップデート';
+  document.getElementById('cpInstanceName').textContent='EasyLXD ホスト';
+  document.getElementById('createProgressLog').innerHTML='';
+  document.getElementById('cpStatusText').textContent='アップデート実行中...';
+  document.getElementById('cpSpinner').style.display='';
+  try{
+    const res=await fetch('/api/server/update/stream',{method:'POST'});
+    if(!res.ok){const err=await res.json();throw new Error(err.error||'Update failed')}
+    const reader=res.body.getReader();const decoder=new TextDecoder();let buffer='',errMsg=null,evt='';
+    while(true){const{done,value}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const lines=buffer.split('\n');buffer=lines.pop();for(const line of lines){if(line.startsWith('event:')){evt=line.slice(6).trim()}else if(line.startsWith('data:')){try{const d=JSON.parse(line.slice(5));if(d.message)appendCreateLog(d.message);if(evt==='error'&&d.error)errMsg=d.error}catch(e){}}}}
+    if(errMsg)throw new Error(errMsg);
+    const msg='アップデート完了 — 「サーバ再起動」ボタンを押してください';
+    appendCreateLog(msg);
+    document.getElementById('cpStatusText').textContent=msg;
+    document.getElementById('cpSpinner').style.display='none';
+    toast(msg)
+  }catch(e){
+    appendCreateLog('エラー: '+e.message);
+    document.getElementById('cpStatusText').textContent='エラー: '+e.message;
+    document.getElementById('cpSpinner').style.display='none'
+  }finally{b.disabled=false}
+}
+function confirmServerReboot(){
+  document.getElementById('confirmTitle').textContent='サーバ再起動';
+  document.getElementById('confirmMsg').innerHTML=`EasyLXD ホストを再起動しますか？<br>すべてのインスタンスが停止し、UI も一時的に切断されます。`;
+  document.getElementById('confirmBtn').className='btn btn-danger';
+  document.getElementById('confirmBtn').onclick=async()=>{closeModals();await doServerReboot()};
+  document.getElementById('confirmModal').classList.add('active');
+}
+async function doServerReboot(){
+  const w=toastWorking('サーバを再起動中...');
+  try{
+    const r=await api('/api/server/reboot',{method:'POST'});
+    if(r.error)throw new Error(r.error);
+    w.remove();
+    const ov=document.createElement('div');ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:400;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;color:var(--text);font-size:15px';
+    ov.innerHTML='<div class="spinner" style="width:32px;height:32px;border-width:3px"></div><div>サーバを再起動中です。起動が完了すると自動的に再読み込みされます。</div>';
+    document.body.appendChild(ov);
+    const iv=setInterval(async()=>{try{const r=await fetch('/api/instances');if(r.ok){clearInterval(iv);location.reload()}}catch(e){}},5000);
+  }catch(e){w.fail(`エラー: ${e.message}`)}
+}
 function showClone(n){document.getElementById('cloneSource').value=n;document.getElementById('cloneNewName').value='';document.getElementById('cloneModal').classList.add('active')}
 async function doClone(){const s=document.getElementById('cloneSource').value,n=document.getElementById('cloneNewName').value.trim();if(!n)return;closeModals();const w=toastWorking(`"${s}" を "${n}" にクローン中...`);try{const r=await api(`/api/instances/${s}/clone`,{method:'POST',body:{newName:n}});if(r.error)throw new Error(r.error);w.done(r.message||'クローンしました');refresh()}catch(e){w.fail(`エラー: ${e.message}`)}}
 function showSnapshot(n){document.getElementById('snapInstance').value=n;document.getElementById('snapComment').value='';document.getElementById('snapshotModal').classList.add('active')}

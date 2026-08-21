@@ -461,6 +461,47 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
 
+  const SETUP_SCRIPT_URL = 'https://raw.githubusercontent.com/hirogura/easylxd/main/lxd-setup.sh';
+
+  if (pathname === '/api/server/update/stream' && req.method === 'POST') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no'
+    });
+    res.write(':\n\n');
+    const send = (evt, data) => { try { res.write(`event: ${evt}\ndata: ${JSON.stringify(data)}\n\n`); } catch (e) {} };
+    // 一時ファイル名は mktemp でランダム生成し、多重実行やシンボリックリンク攻撃を防ぐ。
+    // /snap/bin を先頭に付与するのは systemd 経由起動時に snap の lxc/snap コマンドが
+    // PATH 外になるケースがあるため（installer の export PATH と同じ意図）。
+    const script = [
+      'set -euo pipefail',
+      'export PATH="/snap/bin:$PATH"',
+      'TMP=$(mktemp /tmp/lxd-setup.XXXXXXXX.sh)',
+      'trap \'rm -f "$TMP"\' EXIT',
+      `curl -fsSL -o "$TMP" ${SETUP_SCRIPT_URL}`,
+      'chmod +x "$TMP"',
+      '"$TMP"'
+    ].join('\n');
+    try {
+      send('log', { message: `最新のセットアップスクリプトをダウンロード中... (${SETUP_SCRIPT_URL})` });
+      await run('bash', ['-c', script], 1800000, streamToLog(msg => send('log', { message: msg }), ''));
+      send('done', { message: 'サーバアップデート完了' });
+    } catch (e) {
+      send('error', { error: e.message });
+    }
+    res.end();
+    return;
+  }
+
+  if (pathname === '/api/server/reboot' && req.method === 'POST') {
+    setTimeout(() => {
+      try { const c = spawn('systemctl', ['reboot'], { stdio: 'ignore', detached: true }); c.unref(); } catch (e) {}
+    }, 500);
+    return json(res, 200, { ok: true, message: 'Host reboot scheduled' });
+  }
+
   const termResetMatch = pathname.match(/^\/api\/terminal\/reset\/(.+)$/);
   if (termResetMatch && req.method === 'POST') {
     const instName = termResetMatch[1];
