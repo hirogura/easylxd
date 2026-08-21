@@ -37,24 +37,12 @@ CURRENT_SOURCE=$(sudo lxc storage get default source 2>/dev/null || echo "")
 if [ "$CURRENT_SOURCE" = "$LXD_POOL_DIR" ]; then
   echo "[SKIP] Storage pool は既に $LXD_POOL_DIR を向いています"
 else
-  echo ""
-  echo "------------------------------------------"
-  echo " 既存のデフォルトプールが検出されました"
-  echo "   現在のソース: $CURRENT_SOURCE"
-  echo "   変更先:      $LXD_POOL_DIR"
-  echo "------------------------------------------"
-  read -rp " デフォルトプールを $LXD_POOL_DIR に変更しますか？ [Y/n] " CHANGE_POOL
-  CHANGE_POOL=${CHANGE_POOL:-Y}
-  if [[ "$CHANGE_POOL" =~ ^[Yy]$ ]]; then
-    echo "[RUN]  Storage pool を $LXD_POOL_DIR に変更します..."
-    # default プールを参照しているプロファイルデバイスを先に外す
-    sudo lxc profile device remove default root 2>/dev/null || true
-    sudo lxc storage delete default 2>/dev/null || true
-    sudo lxc storage create default dir source="$LXD_POOL_DIR"
-    sudo lxc profile device add default root disk path=/ pool=default
-  else
-    echo "[SKIP] デフォルトプールは既存のまま維持します"
-  fi
+  echo "[RUN]  Storage pool を $LXD_POOL_DIR に変更します..."
+  # default プールを参照しているプロファイルデバイスを先に外す
+  sudo lxc profile device remove default root 2>/dev/null || true
+  sudo lxc storage delete default 2>/dev/null || true
+  sudo lxc storage create default dir source="$LXD_POOL_DIR"
+  sudo lxc profile device add default root disk path=/ pool=default
 fi
 
 # ------------------------------------------------------------
