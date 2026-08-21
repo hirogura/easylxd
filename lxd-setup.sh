@@ -19,9 +19,9 @@ else
 fi
 
 # ------------------------------------------------------------
-# 2. LXD 初期化
+# 2. LXD 初期化（本当に未初期化の時だけ実行）
 # ------------------------------------------------------------
-if sudo lxc info &>/dev/null 2>&1 && sudo lxc storage list | grep -q "default"; then
+if sudo lxc info &>/dev/null; then
   echo "[SKIP] LXD は既に初期化済みです"
 else
   echo "[RUN]  LXD を初期化します..."
@@ -30,6 +30,7 @@ fi
 
 # ------------------------------------------------------------
 # 3. ストレージプールを /opt/lxd-pool に変更
+#    （default プールが無い状態でも必ず作成する）
 # ------------------------------------------------------------
 sudo mkdir -p "$LXD_POOL_DIR"
 
@@ -38,15 +39,26 @@ if [ "$CURRENT_SOURCE" = "$LXD_POOL_DIR" ]; then
   echo "[SKIP] Storage pool は既に $LXD_POOL_DIR を向いています"
 else
   echo "[RUN]  Storage pool を $LXD_POOL_DIR に変更します..."
-  # default プールを参照しているプロファイルデバイスを先に外す
-  sudo lxc profile device remove default root 2>/dev/null || true
-  sudo lxc storage delete default 2>/dev/null || true
+  if sudo lxc storage show default &>/dev/null; then
+    # default プールを参照しているプロファイルデバイスを先に外す
+    sudo lxc profile device remove default root 2>/dev/null || true
+    sudo lxc storage delete default
+  fi
   sudo lxc storage create default dir source="$LXD_POOL_DIR"
+fi
+
+# ------------------------------------------------------------
+# 4. default プロファイルへの root ディスク割り当てを保証
+# ------------------------------------------------------------
+if sudo lxc profile device list default 2>/dev/null | grep -qw "root"; then
+  echo "[SKIP] default プロファイルには root ディスクが設定済みです"
+else
+  echo "[RUN]  default プロファイルに root ディスクを追加します..."
   sudo lxc profile device add default root disk path=/ pool=default
 fi
 
 # ------------------------------------------------------------
-# 4. HTTPS API を有効化
+# 5. HTTPS API を有効化
 # ------------------------------------------------------------
 CURRENT_HTTPS=$(sudo lxc config get core.https_address 2>/dev/null || echo "")
 if [ "$CURRENT_HTTPS" = ":8443" ]; then
@@ -57,7 +69,7 @@ else
 fi
 
 # ------------------------------------------------------------
-# 5. ユーザーを lxd グループに追加
+# 6. ユーザーを lxd グループに追加
 # ------------------------------------------------------------
 if id -nG "$USER" | grep -qw lxd; then
   echo "[SKIP] $USER は既に lxd グループのメンバーです"

@@ -16,38 +16,10 @@ if ! command -v curl &>/dev/null; then
 fi
 
 # --- LXD ---
-if command -v lxc &>/dev/null; then
-  echo "LXD: $(lxc version 2>/dev/null || lxc --version)"
-else
-  echo ""
-  echo "LXD がインストールされていません。"
-  if [ -t 0 ]; then
-    read -rp "先に LXD をインストールしますか？ [y/N]: " INSTALL_LXD
-  else
-    echo "非対話モードのため LXD の自動インストールをスキップします。"
-    INSTALL_LXD="n"
-  fi
-  case "$INSTALL_LXD" in
-    [yY]|[yY][eE][sS])
-      echo "LXD セットアップスクリプトを取得中..."
-      LXD_SETUP="/tmp/lxd-setup.sh"
-      curl -fsSL -o "$LXD_SETUP" "${REPO_URL/github.com/raw.githubusercontent.com}/${GIT_BRANCH}/lxd-setup.sh"
-      chmod +x "$LXD_SETUP"
-      echo "LXD セットアップを実行します..."
-      "$LXD_SETUP"
-      export PATH="/snap/bin:$PATH"
-      if ! command -v lxc &>/dev/null; then
-        echo "ERROR: LXD のインストール後に lxc コマンドが見つかりません。一度ログインし直してから再実行してください。"
-        exit 1
-      fi
-      echo "LXD: $(lxc version 2>/dev/null || lxc --version)"
-      ;;
-    *)
-      echo "LXD がインストールされていないため、EasyLXD をインストールできません。中止します。"
-      exit 1
-      ;;
-  esac
-fi
+# LXD のインストール・初期化はソース取得後に lxd-setup.sh で必ず実施する。
+# (Ubuntu Server は lxd snap がプリインストールされているため未初期化のまま
+#  見逃され、「No root disk device found」エラーの原因になっていた)
+export PATH="/snap/bin:$PATH"
 
 # --- Node.js ---
 NODE_PATH=""
@@ -83,11 +55,6 @@ if ! dpkg -s build-essential &>/dev/null 2>&1; then
   echo "build-essential をインストール中..."
   apt-get install -y build-essential python3
 fi
-
-# --- lxc (再確認) ---
-export PATH="/snap/bin:$PATH"
-command -v lxc &>/dev/null || { echo "ERROR: lxc is not installed"; exit 1; }
-echo "LXC: $(lxc version 2>/dev/null || lxc --version)"
 
 # --- pciutils ---
 if ! command -v lspci &>/dev/null; then
@@ -127,13 +94,24 @@ rm -f "$TMP_TAR"
 echo "GitHub からの取得が完了しました"
 
 # --- 取得ファイルの確認 ---
-for f in server.js package.json public/index.html; do
+for f in server.js package.json public/index.html lxd-setup.sh; do
   if [ ! -f "$INSTALL_DIR/$f" ]; then
     echo "ERROR: $INSTALL_DIR/$f が取得できませんでした。リポジトリの公開状態を確認してください。"
     exit 1
   fi
 done
 echo "ソースファイルの確認 OK"
+
+# --- LXD セットアップ（冪等。未導入なら導入、未初期化なら初期化し、
+#     ストレージプールと default プロファイルの root ディスクを必ず保証する）---
+if ! command -v snap &>/dev/null; then
+  echo "ERROR: snap が見つかりません。LXD を手動でインストールしてから再実行してください。"
+  exit 1
+fi
+echo "LXD セットアップを実行します..."
+bash "$INSTALL_DIR/lxd-setup.sh"
+command -v lxc &>/dev/null || { echo "ERROR: LXD のセットアップに失敗しました (lxc コマンドが見つかりません)"; exit 1; }
+echo "LXD: $(lxc version 2>/dev/null || lxc --version)"
 
 # --- npm パッケージ (WebSocket + PTY) ---
 echo "npm パッケージをインストール中..."
