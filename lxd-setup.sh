@@ -9,12 +9,24 @@ set -euo pipefail
 LXD_POOL_DIR="/opt/lxd-pool"
 
 # ------------------------------------------------------------
-# 1. LXD インストール確認（強制インストールはしない）
+# 1. LXD インストール（導入済みなら確実に検出してスキップ）
+#    Ubuntu Server は lxd snap がプリインストールされているため、
+#    /snap/bin が PATH 外の非ログインシェルでも取りこぼさないよう
+#    実パスと snap list の両方で判定する。
 # ------------------------------------------------------------
-if command -v lxc &>/dev/null || snap list lxd &>/dev/null; then
+LXD_FOUND=false
+for c in "$(command -v lxc 2>/dev/null || true)" /snap/bin/lxc /usr/bin/lxc; do
+  if [ -n "$c" ] && [ -x "$c" ]; then LXD_FOUND=true; break; fi
+done
+snap list lxd &>/dev/null && LXD_FOUND=true
+
+if [ "$LXD_FOUND" = true ]; then
   echo "[SKIP] LXD は既にインストール済みです"
+elif command -v snap &>/dev/null; then
+  echo "[RUN]  LXD をインストールします..."
+  sudo snap install lxd
 else
-  echo "ERROR: LXD が見つかりません。以下を実行してから再実行してください:"
+  echo "ERROR: snap が見つかりません。LXD を手動でインストールしてから再実行してください:"
   echo "  sudo snap install lxd"
   exit 1
 fi
