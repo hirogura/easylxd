@@ -30,15 +30,26 @@ done
 
 # ------------------------------------------------------------
 # 1. LXD インストール（導入済みなら確実に検出してスキップ）
-#    Ubuntu Server は lxd snap がプリインストールされているため、
-#    /snap/bin が PATH 外の非ログインシェルでも取りこぼさないよう
-#    実パスと snap list の両方で判定する。
+#    判定は「snap list lxd で snap が登録されているか」+「実バイナリ
+#    /snap/bin/lxc が存在するか」のみを信頼する。
+#    Ubuntu の lxd-installer パッケージは /usr/sbin/lxc 等にダミーの
+#    ラッパースクリプトを置くため、command -v lxc や /usr/bin/lxc の
+#    存在チェックでは本物と誤認され、未インストールなのに [SKIP] に
+#    なってしまう（ラッパーは "Would you like to install LXD snap now"
+#    と問い合わせてくるので、これが出たら検出ミスのサイン）。
+#    snap 登録のみで実バイナリが無い場合は無効化されているので復旧する。
 # ------------------------------------------------------------
 LXD_FOUND=false
-for c in "$(command -v lxc 2>/dev/null || true)" /snap/bin/lxc /usr/bin/lxc; do
-  if [ -n "$c" ] && [ -x "$c" ]; then LXD_FOUND=true; break; fi
-done
-snap list lxd &>/dev/null && LXD_FOUND=true
+if snap list lxd &>/dev/null; then
+  sudo snap enable lxd 2>/dev/null || true
+  if [ -x /snap/bin/lxc ]; then
+    LXD_FOUND=true
+  else
+    echo "ERROR: LXD snap が無効化されており有効化できません。以下を確認してください:"
+    echo "  sudo snap enable lxd"
+    exit 1
+  fi
+fi
 
 if [ "$LXD_FOUND" = true ]; then
   echo "[SKIP] LXD は既にインストール済みです"
