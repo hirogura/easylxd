@@ -14,7 +14,7 @@
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
 a{color:var(--accent);text-decoration:none}
 .header{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 24px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:100}
-.header h1{font-size:20px;font-weight:600}.header .subtitle{color:var(--text2);font-size:14px}.header .actions{margin-left:auto;display:flex;gap:8px}
+.header h1{font-size:20px;font-weight:600}.header h1 .version{font-size:12px;font-weight:500;color:var(--text2);margin-left:6px;vertical-align:middle}.header .subtitle{color:var(--text2);font-size:14px}.header .actions{margin-left:auto;display:flex;gap:8px}
 .container{max-width:1200px;margin:0 auto;padding:24px}
 .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border:none;border-radius:var(--radius);font-size:14px;font-weight:500;cursor:pointer;transition:all .15s}
 .btn:disabled{opacity:.5;cursor:not-allowed}.btn-primary{background:var(--accent);color:#fff}.btn-primary:hover:not(:disabled){background:var(--accent-hover)}
@@ -94,7 +94,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(91,138,245,.04)}
 </style>
 </head>
 <body>
-<div class="header"><div><h1>Easy LXD</h1><div class="subtitle">LXD インスタンス管理</div></div><div class="actions"><button class="btn btn-ghost btn-sm" id="serverUpdateBtn" onclick="confirmServerUpdate()">サーバアップデート</button><button class="btn btn-danger btn-sm" onclick="confirmServerReboot()">サーバ再起動</button><button class="btn btn-ghost btn-sm" onclick="refresh()">更新</button><button class="btn btn-primary" onclick="showCreate()">+ 新規インスタンス</button></div></div>
+<div class="header"><div><h1>Easy LXD<span class="version">v.1.0.0</span></h1><div class="subtitle">LXD インスタンス管理</div></div><div class="actions"><button class="btn btn-ghost btn-sm" id="serverUpdateBtn" onclick="confirmServerUpdate()">サーバアップデート</button><button class="btn btn-danger btn-sm" onclick="confirmServerReboot()">サーバ再起動</button><button class="btn btn-ghost btn-sm" onclick="refresh()">更新</button><button class="btn btn-primary" onclick="showCreate()">+ 新規インスタンス</button></div></div>
 <div class="container"><div class="table-wrap"><table><thead><tr><th>名前</th><th>状態</th><th>作成日</th><th>プロファイル</th><th>操作</th></tr></thead><tbody id="instances"></tbody></table></div></div>
 <div id="terminalPanel"><div id="termDragHandle"></div><div class="terminal-bar"><span class="term-title">ターミナル — <span id="termInstanceName"></span></span><div class="term-actions"><button class="btn btn-ghost btn-sm" onclick="resetTerminal()" title="セッションをリセット">⟳ リセット</button><button class="btn btn-ghost btn-sm" onclick="termFit()" title="画面に合わせる">FIT</button><button class="btn btn-ghost btn-sm" onclick="closeTerminal()">✕ 閉じる</button></div></div><div id="terminalContainer"></div></div>
 <div class="create-progress-panel" id="createProgressPanel"><div class="create-progress-header"><span class="cp-title"><span id="cpPanelTitle">インスタンス作成</span> — <span id="cpInstanceName"></span></span><div class="cp-status"><div class="spinner" id="cpSpinner"></div><span id="cpStatusText">作成中...</span><button class="cp-close" onclick="closeCreateProgress()" title="閉じる">&times;</button></div></div><div id="createProgressLog"></div></div>
