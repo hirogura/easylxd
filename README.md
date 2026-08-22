@@ -127,8 +127,11 @@ systemctl restart easy-lxd
 
 ### アップデート（最新版へ更新）
 
-インストールスクリプトを再実行すると、GitHub から最新版を取得して上書きし、
-npm パッケージを更新したうえでサービスを再起動します。
+UI の「サーバアップデート」ボタンから、lxd-setup.sh の再適用と EasyLXD 本体
+（server.js / public など）の最新版取得・npm パッケージ更新・サービス再起動を
+一括で実行できます。
+
+インストールスクリプトを再実行する方法でも最新版へ更新できます。
 
 ```bash
 curl -fsSL -o /tmp/install-easylxd1.sh \

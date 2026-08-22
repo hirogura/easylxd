@@ -134,7 +134,7 @@ function finishCreateProgress(success,msg){document.getElementById('cpStatusText
 function closeCreateProgress(){document.getElementById('createProgressPanel').classList.remove('active')}
 function confirmServerUpdate(){
   document.getElementById('confirmTitle').textContent='サーバアップデート';
-  document.getElementById('confirmMsg').innerHTML=`EasyLXD ホストに対して最新の <span class="confirm-name">lxd-setup.sh</span> をダウンロードして実行しますか？<br>完了後はサーバの再起動が必要です。`;
+  document.getElementById('confirmMsg').innerHTML=`EasyLXD ホストに最新の <span class="confirm-name">lxd-setup.sh</span> を適用し、EasyLXD 本体も最新版に更新します。<br>完了後は自動的にサービスが再起動されます。`;
   document.getElementById('confirmBtn').className='btn btn-primary';
   document.getElementById('confirmBtn').onclick=()=>{closeModals();doServerUpdate()};
   document.getElementById('confirmModal').classList.add('active');
@@ -153,7 +153,7 @@ async function doServerUpdate(){
     const reader=res.body.getReader();const decoder=new TextDecoder();let buffer='',errMsg=null,evt='';
     while(true){const{done,value}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const lines=buffer.split('\n');buffer=lines.pop();for(const line of lines){if(line.startsWith('event:')){evt=line.slice(6).trim()}else if(line.startsWith('data:')){try{const d=JSON.parse(line.slice(5));if(d.message)appendCreateLog(d.message);if(evt==='error'&&d.error)errMsg=d.error}catch(e){}}}}
     if(errMsg)throw new Error(errMsg);
-    const msg='アップデート完了 — 「サーバ再起動」ボタンを押してください';
+    const msg='アップデート完了 — サーバを再起動しました。ページを再読み込みしてください';
     appendCreateLog(msg);
     document.getElementById('cpStatusText').textContent=msg;
     document.getElementById('cpSpinner').style.display='none';

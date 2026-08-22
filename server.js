@@ -462,6 +462,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   const SETUP_SCRIPT_URL = 'https://raw.githubusercontent.com/hirogura/easylxd/main/lxd-setup.sh';
+  const APP_TARBALL_URL = 'https://github.com/hirogura/easylxd/archive/refs/heads/main.tar.gz';
 
   if (pathname === '/api/server/update/stream' && req.method === 'POST') {
     res.writeHead(200, {
@@ -479,22 +480,34 @@ const server = http.createServer(async (req, res) => {
       'set -euo pipefail',
       'export PATH="/snap/bin:$PATH"',
       'TMP=$(mktemp /tmp/lxd-setup.XXXXXXXX.sh)',
-      'trap \'rm -f "$TMP"\' EXIT',
+      'APP=$(mktemp /tmp/easylxd-app.XXXXXXXX.tar.gz)',
+      'trap \'rm -f "$TMP" "$APP"\' EXIT',
       `curl -fsSL -o "$TMP" ${SETUP_SCRIPT_URL}`,
       'chmod +x "$TMP"',
       // --skip-pool: サーバアップデート時はプール関連の処理をスキップする。
       // default プールが /opt/lxd-pool 以外の環境でスクリプトを再実行すると
       // 既存プールの削除・再作成が走ってエラーになるため（初回インストール時のみ変更する）。
-      '"$TMP" --skip-pool'
+      '"$TMP" --skip-pool',
+      `echo "EasyLXD 本体を最新版に更新中... (${APP_TARBALL_URL})"`,
+      `curl -fsSL -o "$APP" ${APP_TARBALL_URL}`,
+      // インストーラと同じく tarball を展開して上書きする。
+      // 実行中の server.js はメモリ上で動き続けるため差し替えは安全。
+      `tar -xzf "$APP" --strip-components=1 -C '${__dirname}'`,
+      // 依存が変わっていない場合は即終了する。node-pty の再ビルドも不要。
+      `cd '${__dirname}' && npm install --omit=dev --no-audit --no-fund`
     ].join('\n');
     try {
       send('log', { message: `最新のセットアップスクリプトをダウンロード中... (${SETUP_SCRIPT_URL})` });
       await run('bash', ['-c', script], 1800000, streamToLog(msg => send('log', { message: msg }), ''));
-      send('done', { message: 'サーバアップデート完了' });
+      send('done', { message: 'アップデート完了 — EasyLXD サービスを再起動します' });
     } catch (e) {
       send('error', { error: e.message });
     }
     res.end();
+    // SSE 応答をクライアントへ返しきってから再起動する（再起動ボタンと同じ detached 手順）。
+    setTimeout(() => {
+      try { const c = spawn('systemctl', ['restart', 'easy-lxd'], { stdio: 'ignore', detached: true }); c.unref(); } catch (e) {}
+    }, 2000);
     return;
   }
 
