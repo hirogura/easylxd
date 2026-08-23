@@ -544,6 +544,15 @@ const server = http.createServer(async (req, res) => {
         'sudo bash install-spw.sh'
       ]
     },
+    rclonegui: {
+      label: 'rcloneGUI',
+      installDir: '/opt/rclonegui',
+      port: 3348,
+      installCmds: [
+        'curl -fsSL https://raw.githubusercontent.com/hirogura/rclonegui/main/install-rclonegui.sh -o install-rclonegui.sh',
+        'sudo bash install-rclonegui.sh'
+      ]
+    },
     immich: {
       label: 'immich',
       installDir: '/opt/docker/immich',
