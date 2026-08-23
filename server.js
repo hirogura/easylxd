@@ -875,16 +875,7 @@ const server = http.createServer(async (req, res) => {
       const cmd = `bash <(curl -fsSL ${DTV_MANAGE_URL})`;
       send('log', { message: `$ lxc exec ${container} -- bash -c "${cmd}"` });
       await lxcExec(container, cmd, 1800000, streamToLog(msg => send('log', { message: msg })));
-      let ip = '';
-      const net = (inst.state && inst.state.network) || {};
-      for (const [iface, info] of Object.entries(net)) {
-        if (iface === 'lo') continue;
-        for (const a of info.addresses || []) {
-          if (a.family === 'inet' && a.scope === 'global') { ip = a.address; break; }
-        }
-        if (ip) break;
-      }
-      send('done', { message: `DTV管理ダッシュボードのインストール完了${ip ? ` — http://${ip}/` : ''}` });
+      send('done', { message: `DTV管理ダッシュボードのインストール完了 — 「DTV管理」ボタンが http://${container}/ へのリンクに変わりました` });
     } catch (e) {
       send('error', { error: e.message });
     }
