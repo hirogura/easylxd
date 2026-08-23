@@ -63,9 +63,20 @@ function json(res, code, obj) {
   res.end(JSON.stringify(obj));
 }
 
+// Tailscale IP (CGNAT 100.64.0.0/10) が tailscale0 に割り当てられているか。
+// lxc list の state.network を見るだけなので追加の exec は不要。
+function hasTailscaleIp(inst) {
+  const net = inst.state && inst.state.network;
+  const ts = net && net.tailscale0;
+  return !!(ts && (ts.addresses || []).some(a => a.family === 'inet' && /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(a.address)));
+}
+
 async function getInstances() {
   const { stdout } = await lxc('list', '--format', 'json');
-  return JSON.parse(stdout).map(c => {
+  const raw = JSON.parse(stdout);
+  // Docker 動作確認は exec が重いため稼働中のみ、かつキャッシュを効かせる。
+  const dockerStatus = await Promise.all(raw.map(async c => ((c.status === 'Running') ? await isDockerRunning(c.name) : false)));
+  return raw.map((c, idx) => {
     const cfg = c.config || {};
     return {
       name: c.name, status: c.status, ephemeral: c.ephemeral, type: c.type,
@@ -76,7 +87,9 @@ async function getInstances() {
         privileged: cfg['security.privileged'] === 'true'
       },
       state: c.state ? { status: c.state.status, pid: c.state.pid, memory: c.state.memory, disk: c.state.disk, cpu: c.state.cpu, network: c.state.network } : null,
-      snapshots: c.snapshots || []
+      snapshots: c.snapshots || [],
+      tailscale: hasTailscaleIp(c),
+      docker: dockerStatus[idx]
     };
   });
 }
@@ -136,6 +149,29 @@ async function waitNetworkReady(name, timeoutSec = 30) {
     await new Promise(r => setTimeout(r, 1000));
   }
   return { ok: false, waited: timeoutSec };
+}
+
+// Docker 動作確認 (docker info) は lxc exec が重いため結果を短時間キャッシュする。
+const DOCKER_CHECK_TTL_MS = 60000;
+const dockerCheckCache = new Map();
+async function isDockerRunning(name) {
+  const cached = dockerCheckCache.get(name);
+  if (cached && Date.now() - cached.at < DOCKER_CHECK_TTL_MS) return cached.ok;
+  let ok = false;
+  try {
+    await lxcExec(name, 'command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1', 20000);
+    ok = true;
+  } catch (e) {}
+  dockerCheckCache.set(name, { ok, at: Date.now() });
+  return ok;
+}
+
+// 稼働中かつ Docker が動作しているコンテナ名の一覧を返す。
+async function getDockerContainers() {
+  let running = [];
+  try { running = (await getInstances()).filter(i => i.status === 'Running').map(i => i.name); } catch (e) { return []; }
+  const checks = await Promise.all(running.map(async n => ((await isDockerRunning(n)) ? n : null)));
+  return checks.filter(Boolean);
 }
 
 const UBUNTU_VERSIONS = ['26.04', '25.10', '25.04', '24.04', '22.04', '20.04', '18.04'];
@@ -554,29 +590,6 @@ const server = http.createServer(async (req, res) => {
       const ts = JSON.parse(stdout);
       return ((((ts || {}).Self || {}).DNSName) || '').replace(/\.$/, '');
     } catch (e) { return ''; }
-  }
-
-  // Docker 動作確認 (docker info) は lxc exec が重いため結果を短時間キャッシュする。
-  const DOCKER_CHECK_TTL_MS = 60000;
-  const dockerCheckCache = new Map();
-  async function isDockerRunning(name) {
-    const cached = dockerCheckCache.get(name);
-    if (cached && Date.now() - cached.at < DOCKER_CHECK_TTL_MS) return cached.ok;
-    let ok = false;
-    try {
-      await lxcExec(name, 'command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1', 20000);
-      ok = true;
-    } catch (e) {}
-    dockerCheckCache.set(name, { ok, at: Date.now() });
-    return ok;
-  }
-
-  // 稼働中かつ Docker が動作しているコンテナ名の一覧を返す。
-  async function getDockerContainers() {
-    let running = [];
-    try { running = (await getInstances()).filter(i => i.status === 'Running').map(i => i.name); } catch (e) { return []; }
-    const checks = await Promise.all(running.map(async n => ((await isDockerRunning(n)) ? n : null)));
-    return checks.filter(Boolean);
   }
 
   if (pathname === '/api/apps' && req.method === 'GET') {
