@@ -212,8 +212,8 @@ async function showGpuModal(instName){document.getElementById('gpuInstance').val
 function confirmAddGpu(instName,pci,desc){document.getElementById('confirmTitle').textContent='GPU パススルーの追加';document.getElementById('confirmMsg').innerHTML=`GPU <span class="confirm-name">${esc(desc)}</span> (${esc(pci)}) を <span class="confirm-name">${esc(instName)}</span> に追加しますか？<br>GPU パススルーは即座に有効になります（再起動不要）。`;document.getElementById('confirmBtn').className='btn btn-danger';document.getElementById('confirmBtn').onclick=async()=>{closeModals();const w=toastWorking(`GPU を ${instName} に追加中...`);try{const r=await api(`/api/instances/${instName}/gpu/add`,{method:'POST',body:{pci}});if(r.error)throw new Error(r.error);w.done(r.message||'GPU を追加しました');refresh();setTimeout(()=>showGpuModal(instName),600)}catch(e){w.fail(`エラー: ${e.message}`)}};closeModals();document.getElementById('confirmModal').classList.add('active')}
 function confirmRemoveGpu(instName,deviceName){document.getElementById('confirmTitle').textContent='GPU パススルーの取り外し';document.getElementById('confirmMsg').innerHTML=`GPU デバイス <span class="confirm-name">${esc(deviceName)}</span> を <span class="confirm-name">${esc(instName)}</span> から取り外しますか？`;document.getElementById('confirmBtn').className='btn btn-danger';document.getElementById('confirmBtn').onclick=async()=>{closeModals();const w=toastWorking(`GPU を ${instName} から取り外し中...`);try{const r=await api(`/api/instances/${instName}/gpu/remove`,{method:'POST',body:{deviceName}});if(r.error)throw new Error(r.error);w.done('GPU を取り外しました');refresh();setTimeout(()=>showGpuModal(instName),600)}catch(e){w.fail(`エラー: ${e.message}`)}};closeModals();document.getElementById('confirmModal').classList.add('active')}
 // --- アプリ一覧 ---
-let appsData=[];
-async function loadApps(){try{const r=await api('/api/apps');appsData=r.apps||[]}catch(e){appsData=[]}renderApps()}
+let appsData=[],dockerContainers=[];
+async function loadApps(){try{const r=await api('/api/apps');appsData=r.apps||[];dockerContainers=r.dockerContainers||[]}catch(e){appsData=[];dockerContainers=[]}renderApps()}
 function appTargetRow(app,r){
   let action;
   if(r.running){
@@ -236,9 +236,11 @@ function renderApps(){
   const running=instances.filter(i=>i.status==='Running');
   panel.innerHTML=appsData.map(app=>{
     const selId=`sel-${esc(app.id)}`;
-    const opts=running.length?running.map(i=>`<option value="${esc(i.name)}">${esc(i.name)}</option>`).join(''):'<option value="">稼働中のコンテナがありません</option>';
+    const pool=app.requiresDocker?dockerContainers:running;
+    const emptyMsg=app.requiresDocker?'Dockerが動作する稼働中コンテナがありません':'稼働中のコンテナがありません';
+    const opts=pool.length?pool.map(i=>`<option value="${esc(i.name)}">${esc(i.name)}</option>`).join(''):`<option value="">${emptyMsg}</option>`;
     const regs=(app.containers||[]).length?(app.containers||[]).map(r=>appTargetRow(app,r)).join(''):'<div class="app-empty">コンテナを選んで「登録」を押してください</div>';
-    return `<div class="app-block"><div class="app-name">${esc(app.label)}</div><div class="app-row"><select id="${selId}">${opts}</select><button class="btn btn-ghost btn-sm" onclick="registerApp('${esc(app.id)}')">登録</button></div><div class="app-registered">${regs}</div></div>`;
+    return `<div class="app-block"><div class="app-name">${esc(app.label)}${app.requiresDocker?' <span class="app-empty">(Docker)</span>':''}</div><div class="app-row"><select id="${selId}">${opts}</select><button class="btn btn-ghost btn-sm" onclick="registerApp('${esc(app.id)}')">登録</button></div><div class="app-registered">${regs}</div></div>`;
   }).join('');
   appsData.forEach(app=>{const s=document.getElementById(`sel-${app.id}`);if(s&&prev[s.id]&&[...s.options].some(o=>o.value===prev[s.id]))s.value=prev[s.id]});
 }

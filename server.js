@@ -517,6 +517,18 @@ const server = http.createServer(async (req, res) => {
         'curl -fsSL https://raw.githubusercontent.com/hirogura/spw/main/install-spw.sh -o install-spw.sh',
         'sudo bash install-spw.sh'
       ]
+    },
+    immich: {
+      label: 'immich',
+      installDir: '/opt/docker/immich',
+      // アプリ本体は2283で待機し、Tailscale Serve (HTTPS) が3307で公開する。
+      // Docker Compose 必須のため requiresDocker を付ける。
+      port: 3307,
+      requiresDocker: true,
+      installCmds: [
+        'curl -fsSL -o /tmp/install-immich.sh https://raw.githubusercontent.com/hirogura/scripts/main/install-immich.sh',
+        'sudo bash /tmp/install-immich.sh'
+      ]
     }
   };
 
@@ -544,6 +556,29 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return ''; }
   }
 
+  // Docker 動作確認 (docker info) は lxc exec が重いため結果を短時間キャッシュする。
+  const DOCKER_CHECK_TTL_MS = 60000;
+  const dockerCheckCache = new Map();
+  async function isDockerRunning(name) {
+    const cached = dockerCheckCache.get(name);
+    if (cached && Date.now() - cached.at < DOCKER_CHECK_TTL_MS) return cached.ok;
+    let ok = false;
+    try {
+      await lxcExec(name, 'command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1', 20000);
+      ok = true;
+    } catch (e) {}
+    dockerCheckCache.set(name, { ok, at: Date.now() });
+    return ok;
+  }
+
+  // 稼働中かつ Docker が動作しているコンテナ名の一覧を返す。
+  async function getDockerContainers() {
+    let running = [];
+    try { running = (await getInstances()).filter(i => i.status === 'Running').map(i => i.name); } catch (e) { return []; }
+    const checks = await Promise.all(running.map(async n => ((await isDockerRunning(n)) ? n : null)));
+    return checks.filter(Boolean);
+  }
+
   if (pathname === '/api/apps' && req.method === 'GET') {
     try {
       const apps = readApps();
@@ -566,9 +601,9 @@ const server = http.createServer(async (req, res) => {
           const dns = running && installed ? await getTailscaleDnsName(name) : '';
           return { container: name, running, installed, url: dns ? `https://${dns}:${cfg.port}/` : null };
         }));
-        return { id: appId, label: cfg.label, containers };
+        return { id: appId, label: cfg.label, requiresDocker: !!cfg.requiresDocker, containers };
       }));
-      return json(res, 200, { apps: result });
+      return json(res, 200, { apps: result, dockerContainers: await getDockerContainers() });
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
 
