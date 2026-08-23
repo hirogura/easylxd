@@ -92,11 +92,25 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(91,138,245,.04)}
 .create-progress-header .cp-close{background:none;border:none;color:var(--text2);font-size:18px;cursor:pointer;padding:4px 8px;border-radius:4px}.create-progress-header .cp-close:hover{background:var(--surface);color:var(--text)}
 #createProgressLog{flex:1;overflow-y:auto;padding:12px 16px;font-family:'SF Mono',Consolas,'Courier New',monospace;font-size:13px;line-height:1.6;color:var(--text);white-space:pre-wrap;word-break:break-all}
 .cp-log-line{padding:1px 0}.cp-log-line.log-time{color:var(--text2)}.cp-log-line.log-success{color:var(--green);font-weight:600}.cp-log-line.log-error{color:var(--red);font-weight:600}
+.layout{display:flex;gap:20px;align-items:flex-start}
+.main-col{flex:1;min-width:0}
+.app-panel{width:300px;flex-shrink:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+.app-panel-title{font-size:14px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+.app-name{font-size:15px;font-weight:600;margin-bottom:10px}
+.app-row{display:flex;gap:6px;align-items:stretch}
+.app-row select{flex:1;min-width:0;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:13px}
+.app-row select:focus{outline:none;border-color:var(--accent)}
+.app-row .btn{white-space:nowrap}
+.app-registered{margin-top:12px;display:flex;flex-direction:column;gap:8px}
+.app-target{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--surface2);border-radius:6px;font-size:13px;flex-wrap:wrap}
+.app-target-name{flex:1;min-width:0;font-family:'SF Mono',Consolas,monospace;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.app-empty{color:var(--text2);font-size:13px;font-style:italic}
+@media(max-width:900px){.layout{flex-direction:column}.app-panel{width:100%}}
 </style>
 </head>
 <body>
-<div class="header"><div><h1>Easy LXD<span class="version">v.1.1.0</span></h1><div class="subtitle">LXD インスタンス管理</div></div><div class="actions"><button class="btn btn-ghost btn-sm" id="serverUpdateBtn" onclick="confirmServerUpdate()">サーバアップデート</button><button class="btn btn-danger btn-sm" onclick="confirmServerReboot()">サーバ再起動</button><button class="btn btn-ghost btn-sm" onclick="refresh()">更新</button><button class="btn btn-primary" onclick="showCreate()">+ 新規インスタンス</button></div></div>
-<div class="container"><div class="table-wrap"><table><thead><tr><th>名前</th><th>状態</th><th>作成日</th><th>プロファイル</th><th>操作</th></tr></thead><tbody id="instances"></tbody></table></div></div>
+<div class="header"><div><h1>Easy LXD<span class="version">v.1.2.0</span></h1><div class="subtitle">LXD インスタンス管理</div></div><div class="actions"><button class="btn btn-ghost btn-sm" id="serverUpdateBtn" onclick="confirmServerUpdate()">サーバアップデート</button><button class="btn btn-danger btn-sm" onclick="confirmServerReboot()">サーバ再起動</button><button class="btn btn-ghost btn-sm" onclick="refresh()">更新</button><button class="btn btn-primary" onclick="showCreate()">+ 新規インスタンス</button></div></div>
+<div class="container layout"><div class="main-col"><div class="table-wrap"><table><thead><tr><th>名前</th><th>状態</th><th>作成日</th><th>プロファイル</th><th>操作</th></tr></thead><tbody id="instances"></tbody></table></div></div><aside class="app-panel"><div class="app-panel-title">アプリ一覧</div><div class="app-name">SelfExplorer</div><div class="app-row"><select id="seContainer"><option value="">読み込み中...</option></select><button class="btn btn-primary btn-sm" onclick="registerSelfExplorer()">登録</button></div><div class="app-registered" id="seRegisteredList"></div></aside></div>
 <div id="terminalPanel"><div id="termDragHandle"></div><div class="terminal-bar"><span class="term-title">ターミナル — <span id="termInstanceName"></span></span><div class="term-actions"><button class="btn btn-ghost btn-sm" onclick="resetTerminal()" title="セッションをリセット">⟳ リセット</button><button class="btn btn-ghost btn-sm" onclick="termFit()" title="画面に合わせる">FIT</button><button class="btn btn-ghost btn-sm" onclick="closeTerminal()">✕ 閉じる</button></div></div><div id="terminalContainer"></div></div>
 <div class="create-progress-panel" id="createProgressPanel"><div class="create-progress-header"><span class="cp-title"><span id="cpPanelTitle">インスタンス作成</span> — <span id="cpInstanceName"></span></span><div class="cp-status"><div class="spinner" id="cpSpinner"></div><span id="cpStatusText">作成中...</span><button class="cp-close" onclick="closeCreateProgress()" title="閉じる">&times;</button></div></div><div id="createProgressLog"></div></div>
 <div class="modal-overlay" id="createModal"><div class="modal"><div class="modal-header"><h2>インスタンス作成</h2><button class="modal-close" onclick="closeModals()">&times;</button></div><div class="modal-body"><div class="form-group"><label>インスタンス名</label><input type="text" id="newName" placeholder="例: my-server" pattern="[a-zA-Z0-9_-]+"></div><div class="form-group"><label>イメージ</label><div class="image-row"><select id="newImage"><option value="">読み込み中...</option></select><button class="btn btn-ghost btn-sm" id="refreshImagesBtn" onclick="doRefreshImages()" title="新しいイメージを確認">↻ 確認</button></div><input type="text" id="newImageCustom" placeholder="例: ubuntu:24.04, debian:12, alpine/3.18" style="display:none;margin-top:8px"></div><div class="form-group" id="optsGroup" style="display:none"><label>オプション</label><label class="checkbox-label"><input type="checkbox" id="optUpdate" checked> アップデート (apt upgrade)</label><label class="checkbox-label"><input type="checkbox" id="optTailscale" checked> Tailscale</label><label class="checkbox-label"><input type="checkbox" id="optDocker"> Docker</label><label class="checkbox-label"><input type="checkbox" id="optMount" checked> /opt/lxd-data マウント</label></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModals()">キャンセル</button><button class="btn btn-primary" id="createBtn" onclick="doCreate()" disabled>作成</button></div></div></div>
@@ -111,7 +125,7 @@ function toast(msg,type='success'){const el=document.createElement('div');el.cla
 function toastWorking(msg){const el=document.createElement('div');el.className='toast toast-working pulse';el.innerHTML=`<div class="spinner"></div><span>${esc(msg)}</span>`;document.body.appendChild(el);return{done(okMsg){el.className='toast toast-success';el.innerHTML=`<span>${esc(okMsg)}</span>`;setTimeout(()=>el.remove(),3000)},fail(errMsg){el.className='toast toast-error';el.innerHTML=`<span>${esc(errMsg)}</span>`;setTimeout(()=>el.remove(),4000)},remove(){el.remove()}}}
 function formatDate(d){if(!d)return'-';return new Date(d).toLocaleString('ja-JP',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}
 function statusBadge(s){const cls=s==='Running'?'running':s==='Stopped'?'stopped':'other';const labels={Running:'実行中',Stopped:'停止中'};return`<span class="badge badge-${cls}">${labels[s]||s}</span>`}
-async function refresh(){const t=document.getElementById('instances');t.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:32px"><div class="spinner"></div></td></tr>';try{instances=await api('/api/instances');render()}catch(e){t.innerHTML=`<tr><td colspan="5" style="color:var(--red);padding:24px">エラー: ${e.message}</td></tr>`}}
+async function refresh(){const t=document.getElementById('instances');t.innerHTML='<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:32px"><div class="spinner"></div></td></tr>';try{instances=await api('/api/instances');render();loadApps()}catch(e){t.innerHTML=`<tr><td colspan="5" style="color:var(--red);padding:24px">エラー: ${e.message}</td></tr>`}}
 async function loadImages(){try{const r=await api('/api/images');imageList=r.images||r;renderImageSelect()}catch(e){document.getElementById('newImage').innerHTML='<option value="__custom__">カスタム...</option>'}}
 function renderImageSelect(){const s=document.getElementById('newImage'),p=s.value;s.innerHTML=imageList.map(i=>`<option value="${esc(i.alias)}">${esc(i.alias)} - ${esc(i.description)}</option>`).join('')+'<option value="__custom__">カスタム...</option>';if(p&&[...s.options].some(o=>o.value===p))s.value=p}
 async function doRefreshImages(){const b=document.getElementById('refreshImagesBtn');b.disabled=true;b.textContent='確認中...';const w=toastWorking('新しいイメージを確認中...');try{const r=await api('/api/images/refresh',{method:'POST'});imageList=r.images||r;renderImageSelect();w.done(`${imageList.length} 個のイメージが見つかりました`)}catch(e){w.fail(`エラー: ${e.message}`)}finally{b.disabled=false;b.textContent='↻ 確認'}}
@@ -196,6 +210,68 @@ function confirmAction(n,a){document.getElementById('confirmTitle').textContent=
 async function showGpuModal(instName){document.getElementById('gpuInstance').value=instName;document.getElementById('gpuCurrentList').innerHTML='<div class="overview-empty">読み込み中...</div>';document.getElementById('gpuAvailableList').innerHTML='<div class="overview-empty">読み込み中...</div>';document.getElementById('gpuModal').classList.add('active');try{const i=instances.find(x=>x.name===instName),d=(i&&i.devices)||{},gpus=Object.entries(d).filter(([,v])=>v.type==='gpu');document.getElementById('gpuCurrentList').innerHTML=gpus.length?gpus.map(([n,v])=>`<div class="gpu-item gpu-current"><span class="gpu-label">${esc(n)}</span><span class="gpu-desc">${esc(v.gputype||'physical')} / ${esc(v.pci||'all')}</span><span class="gpu-remove" onclick="confirmRemoveGpu('${esc(instName)}','${esc(n)}')">取り外す</span></div>`).join(''):'<div class="overview-empty">GPU がアタッチされていません</div>'}catch(e){document.getElementById('gpuCurrentList').innerHTML=`<div class="overview-empty">エラー: ${esc(e.message)}</div>`}try{const r=await api('/api/gpus'),gpus=r.gpus||[];document.getElementById('gpuAvailableList').innerHTML=gpus.length?gpus.map(g=>`<div class="gpu-item clickable" onclick="confirmAddGpu('${esc(instName)}','${esc(g.pci)}','${esc(g.desc)}')"><span class="gpu-desc">${esc(g.desc)}</span><span class="gpu-pci">${esc(g.pci)}</span></div>`).join(''):'<div class="overview-empty">ホストに GPU が検出されません</div>'}catch(e){document.getElementById('gpuAvailableList').innerHTML=`<div class="overview-empty">エラー: ${esc(e.message)}</div>`}}
 function confirmAddGpu(instName,pci,desc){document.getElementById('confirmTitle').textContent='GPU パススルーの追加';document.getElementById('confirmMsg').innerHTML=`GPU <span class="confirm-name">${esc(desc)}</span> (${esc(pci)}) を <span class="confirm-name">${esc(instName)}</span> に追加しますか？<br>GPU パススルーは即座に有効になります（再起動不要）。`;document.getElementById('confirmBtn').className='btn btn-danger';document.getElementById('confirmBtn').onclick=async()=>{closeModals();const w=toastWorking(`GPU を ${instName} に追加中...`);try{const r=await api(`/api/instances/${instName}/gpu/add`,{method:'POST',body:{pci}});if(r.error)throw new Error(r.error);w.done(r.message||'GPU を追加しました');refresh();setTimeout(()=>showGpuModal(instName),600)}catch(e){w.fail(`エラー: ${e.message}`)}};closeModals();document.getElementById('confirmModal').classList.add('active')}
 function confirmRemoveGpu(instName,deviceName){document.getElementById('confirmTitle').textContent='GPU パススルーの取り外し';document.getElementById('confirmMsg').innerHTML=`GPU デバイス <span class="confirm-name">${esc(deviceName)}</span> を <span class="confirm-name">${esc(instName)}</span> から取り外しますか？`;document.getElementById('confirmBtn').className='btn btn-danger';document.getElementById('confirmBtn').onclick=async()=>{closeModals();const w=toastWorking(`GPU を ${instName} から取り外し中...`);try{const r=await api(`/api/instances/${instName}/gpu/remove`,{method:'POST',body:{deviceName}});if(r.error)throw new Error(r.error);w.done('GPU を取り外しました');refresh();setTimeout(()=>showGpuModal(instName),600)}catch(e){w.fail(`エラー: ${e.message}`)}};closeModals();document.getElementById('confirmModal').classList.add('active')}
+// --- アプリ一覧 (SelfExplorer) ---
+const SE_URL_BASE='https://CONTAINER.tailf682b.ts.net:3342/';
+let seRegistered=[];
+async function loadApps(){try{const r=await api('/api/apps/selfexplorer');seRegistered=r.containers||[]}catch(e){seRegistered=[]}renderApps()}
+function renderAppSelect(){const s=document.getElementById('seContainer'),p=s.value;const running=instances.filter(i=>i.status==='Running');s.innerHTML=running.length?running.map(i=>`<option value="${esc(i.name)}">${esc(i.name)}</option>`).join(''):'<option value="">稼働中のコンテナがありません</option>';if(p&&[...s.options].some(o=>o.value===p))s.value=p}
+function renderApps(){
+  renderAppSelect();
+  const el=document.getElementById('seRegisteredList');
+  if(!el)return;
+  if(!seRegistered.length){el.innerHTML='<div class="app-empty">コンテナを選んで「登録」を押してください</div>';return}
+  el.innerHTML=seRegistered.map(r=>{
+    let action;
+    if(r.running){
+      if(r.installed){
+        const url=SE_URL_BASE.replace('CONTAINER',r.container);
+        action=`<a class="btn btn-primary btn-sm" href="${esc(url)}" target="_blank" rel="noopener">起動</a>`;
+      }else{
+        action=`<button class="btn btn-primary btn-sm" onclick="confirmInstallSelfExplorer('${esc(r.container)}')">インストール</button>`;
+      }
+    }else{
+      action=`<span class="badge badge-stopped">停止中</span>`;
+    }
+    return `<div class="app-target"><span class="app-target-name" title="${esc(r.container)}">${esc(r.container)}</span>${action}</div>`;
+  }).join('');
+}
+async function registerSelfExplorer(){
+  const s=document.getElementById('seContainer');
+  const c=s.value;if(!c){toast('稼働中のコンテナがありません','error');return}
+  const w=toastWorking(`${c} を SelfExplorer に登録中...`);
+  try{
+    const r=await api('/api/apps/selfexplorer/register',{method:'POST',body:{container:c}});
+    if(r.error)throw new Error(r.error);
+    w.done(r.message||'登録しました');
+    await refresh();
+  }catch(e){w.fail(`エラー: ${e.message}`)}
+}
+function confirmInstallSelfExplorer(container){
+  document.getElementById('confirmTitle').textContent='SelfExplorer インストール';
+  document.getElementById('confirmMsg').innerHTML=`<span class="confirm-name">${esc(container)}</span> に SelfExplorer をインストールしますか？<br>インストールスクリプトがコンテナ内で実行されます。`;
+  document.getElementById('confirmBtn').className='btn btn-primary';
+  document.getElementById('confirmBtn').onclick=()=>{closeModals();doInstallSelfExplorer(container)};
+  document.getElementById('confirmModal').classList.add('active');
+}
+async function doInstallSelfExplorer(container){
+  const panel=document.getElementById('createProgressPanel');panel.classList.add('active');
+  document.getElementById('cpPanelTitle').textContent='アプリ インストール';
+  document.getElementById('cpInstanceName').textContent=`SelfExplorer @ ${container}`;
+  document.getElementById('createProgressLog').innerHTML='';
+  document.getElementById('cpStatusText').textContent='インストール中...';
+  document.getElementById('cpSpinner').style.display='';
+  try{
+    const res=await fetch('/api/apps/selfexplorer/install/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({container})});
+    if(!res.ok){const err=await res.json();throw new Error(err.error||'Install failed')}
+    const reader=res.body.getReader();const decoder=new TextDecoder();let buffer='',errMsg=null,evt='';
+    while(true){const{done,value}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const lines=buffer.split('\n');buffer=lines.pop();for(const line of lines){if(line.startsWith('event:')){evt=line.slice(6).trim()}else if(line.startsWith('data:')){try{const d=JSON.parse(line.slice(5));if(d.message)appendCreateLog(d.message);if(evt==='error'&&d.error)errMsg=d.error}catch(e){}}}}
+    if(errMsg)throw new Error(errMsg);
+    finishCreateProgress(true,'インストール完了');
+  }catch(e){
+    appendCreateLog('エラー: '+e.message);
+    finishCreateProgress(false,'エラー: '+e.message);
+  }
+}
 function closeModals(){document.querySelectorAll('.modal-overlay').forEach(m=>m.classList.remove('active'))}
 document.querySelectorAll('.modal-overlay').forEach(m=>{m.addEventListener('click',e=>{if(e.target===m)closeModals()})});
 

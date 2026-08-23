@@ -468,6 +468,88 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
 
+  // --- アプリ一覧 (SelfExplorer) ---
+  // 登録情報は apps.json に永続化する（ランタイムデータのためリポジトリ外管理）。
+  const APPS_FILE = path.join(__dirname, 'apps.json');
+  const SELFEXPLORER_INSTALL_SCRIPT = 'https://raw.githubusercontent.com/hirogura/selfexplorer/main/install-selfexplorer1.sh';
+  const SELFEXPLORER_INSTALL_CMD = `sudo bash -c "$(curl -fsSL ${SELFEXPLORER_INSTALL_SCRIPT})"`;
+
+  function readApps() {
+    try { return JSON.parse(fs.readFileSync(APPS_FILE, 'utf-8')); } catch (e) { return {}; }
+  }
+  function writeApps(apps) {
+    fs.writeFileSync(APPS_FILE, JSON.stringify(apps, null, 2) + '\n');
+  }
+  // インストール済み判定はインストールディレクトリ /opt/selfexplorer の有無で行う。
+  async function isSelfExplorerInstalled(name) {
+    try {
+      await lxcExec(name, 'test -d /opt/selfexplorer', 15000);
+      return true;
+    } catch (e) { return false; }
+  }
+
+  if (pathname === '/api/apps/selfexplorer' && req.method === 'GET') {
+    try {
+      const apps = readApps();
+      let containers = apps.selfexplorer || [];
+      // 削除済みインスタンスの登録は自動的に掃除する。
+      let instanceNames = new Set();
+      try { instanceNames = new Set((await getInstances()).map(i => i.name)); } catch (e) {}
+      const existing = containers.filter(c => instanceNames.has(c));
+      if (existing.length !== containers.length) {
+        apps.selfexplorer = existing;
+        writeApps(apps);
+        containers = existing;
+      }
+      // 稼働中のコンテナのみインストール状態を確認（停止中は exec できないため null）。
+      const result = await Promise.all(containers.map(async name => {
+        const inst = await getInstance(name).catch(() => null);
+        const running = !!inst && inst.status === 'Running';
+        return { container: name, running, installed: running ? await isSelfExplorerInstalled(name) : null };
+      }));
+      return json(res, 200, { containers: result });
+    } catch (e) { return json(res, 500, { error: e.message }); }
+  }
+
+  if (pathname === '/api/apps/selfexplorer/register' && req.method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      if (!body.container) return json(res, 400, { error: 'container is required' });
+      await getInstance(body.container); // 存在チェック
+      const apps = readApps();
+      const list = new Set(apps.selfexplorer || []);
+      list.add(body.container);
+      apps.selfexplorer = [...list];
+      writeApps(apps);
+      return json(res, 200, { ok: true, message: `${body.container} を SelfExplorer に登録しました` });
+    } catch (e) { return json(res, 500, { error: e.message }); }
+  }
+
+  if (pathname === '/api/apps/selfexplorer/install/stream' && req.method === 'POST') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no'
+    });
+    res.write(':\n\n');
+    const send = (evt, data) => { try { res.write(`event: ${evt}\ndata: ${JSON.stringify(data)}\n\n`); } catch (e) {} };
+    try {
+      const body = await parseBody(req);
+      if (!body.container) { send('error', { error: 'container is required' }); res.end(); return; }
+      await getInstance(body.container);
+      send('log', { message: `=== ${body.container} へ SelfExplorer をインストール開始 ===` });
+      send('log', { message: SELFEXPLORER_INSTALL_CMD });
+      await lxcExec(body.container, SELFEXPLORER_INSTALL_CMD, 1800000, streamToLog(msg => send('log', { message: msg })));
+      const installed = await isSelfExplorerInstalled(body.container);
+      send('done', { message: installed ? 'SelfExplorer のインストールが完了しました' : 'スクリプトは終了しましたが /opt/selfexplorer が見つかりません' });
+    } catch (e) {
+      send('error', { error: e.message });
+    }
+    res.end();
+    return;
+  }
+
   const SECURITY_KEYS = { nesting: 'security.nesting', privileged: 'security.privileged' };
   const securityMatch = pathname.match(/^\/api\/instances\/([^/]+)\/security$/);
   if (securityMatch && req.method === 'POST') {
