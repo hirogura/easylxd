@@ -295,8 +295,13 @@ async function doInstallApp(appId,container){
 // 専用コンテナ作成 → コンテナ内アプリ一式 → 管理ダッシュボード、の順で実行する。
 function renderKonomiBlock(){
   const c=(dtvStatus&&dtvStatus.container)||'';
+  const installed=!!(dtvStatus&&dtvStatus.manageInstalled);
   const status=c?(dtvStatus.exists===false?`対象コンテナ: ${esc(c)}（未作成）`:`対象コンテナ: ${esc(c)}`):'未作成 — 「コンテナ作成」を実行してください';
-  return `<div class="app-block"><div class="app-name">KonomiTV</div><div class="dtv-btns"><button class="btn btn-ghost btn-sm" onclick="confirmDtvDriver()">px4_drvインストール</button><button class="btn btn-primary btn-sm" onclick="showDtvCreate()">コンテナ作成</button><button class="btn btn-primary btn-sm" onclick="confirmDtvAppInstall()">アプリインストール</button><button class="btn btn-ghost btn-sm" onclick="confirmDtvManage()">DTV管理</button></div><div class="app-empty">${status}</div><div class="checkbox-note">px4_drvインストール → コンテナ作成 → アプリインストール → DTV管理 の順で実行します</div></div>`;
+  // 普段使うのは DTV管理 のみ。インストール済みなら MagicDNS 名でのリンクに切り替える。
+  const manageBtn=(installed&&c)
+    ?`<a class="btn btn-primary btn-sm" href="http://${esc(c)}/" target="_blank" rel="noopener">DTV管理</a>`
+    :`<button class="btn btn-primary btn-sm" onclick="confirmDtvManage()">DTV管理</button>`;
+  return `<div class="app-block"><div class="app-name">KonomiTV</div><div class="dtv-btns"><button class="btn btn-ghost btn-sm" onclick="confirmDtvDriver()">px4_drvインストール</button><button class="btn btn-ghost btn-sm" onclick="showDtvCreate()">コンテナ作成</button><button class="btn btn-ghost btn-sm" onclick="confirmDtvAppInstall()">アプリインストール</button>${manageBtn}</div><div class="app-empty">${status}</div><div class="checkbox-note">px4_drvインストール → コンテナ作成 → アプリインストール → DTV管理 の順で実行します</div></div>`;
 }
 function askConfirm(title,msg,fn,okClass='btn-primary'){
   document.getElementById('confirmTitle').textContent=title;

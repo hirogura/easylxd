@@ -740,8 +740,17 @@ const server = http.createServer(async (req, res) => {
       const st = readDtvState();
       const name = st.container || null;
       let exists = false;
-      if (name) exists = !!(await getInstance(name).catch(() => null));
-      return json(res, 200, { container: name, exists });
+      let manageInstalled = false;
+      if (name) {
+        const inst = await getInstance(name).catch(() => null);
+        exists = !!inst;
+        // DTV管理ダッシュボードのインストール済み判定は /opt/dtv-manage の有無。
+        // 稼働中コンテナのみ確認（停止中は exec できないため false）。
+        if (inst && inst.status === 'Running') {
+          try { await lxcExec(name, 'test -d /opt/dtv-manage', 15000); manageInstalled = true; } catch (e) {}
+        }
+      }
+      return json(res, 200, { container: name, exists, manageInstalled });
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
 
