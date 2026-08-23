@@ -343,7 +343,7 @@ async function confirmDtvAppInstall(){
   await confirmDtvStatus();
   const c=dtvStatus&&dtvStatus.container;
   if(!c){toast('先に「コンテナ作成」を実行してください','error');return}
-  askConfirm('KonomiTV アプリ インストール',`<span class="confirm-name">${esc(c)}</span> 内で install-mirakc-edcb-konomitv.sh を実行します。<br>B-CAS キー入力などの対話操作が必要なため、ターミナルが開きます。`,()=>openTerminal(c,'bash ~/install-mirakc-edcb-konomitv.sh'));
+  askConfirm('KonomiTV アプリ インストール',`<span class="confirm-name">${esc(c)}</span> 内で install-mirakc-edcb-konomitv.sh を実行します。<br>スクリプトが未取得（TunerOK スナップショット復元直後など）の場合は自動ダウンロードします。<br>B-CAS キー入力などの対話操作が必要なため、ターミナルが開きます。`,()=>openTerminal(c,'test -f ~/install-mirakc-edcb-konomitv.sh || { echo "スクリプトが見つからないため GitHub から取得します..."; curl -fsSL -o ~/install-mirakc-edcb-konomitv.sh https://raw.githubusercontent.com/hirogura/mirakc-edcb-konomitv/main/install-mirakc-edcb-konomitv.sh && chmod +x ~/install-mirakc-edcb-konomitv.sh; }; bash ~/install-mirakc-edcb-konomitv.sh'));
 }
 async function confirmDtvManage(){
   await confirmDtvStatus();
