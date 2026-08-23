@@ -108,6 +108,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(91,138,245,.04)}
 .app-target{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--surface2);border-radius:6px;font-size:13px;flex-wrap:wrap}
 .app-target-name{flex:1;min-width:0;font-family:'SF Mono',Consolas,monospace;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .app-empty{color:var(--text2);font-size:13px;font-style:italic}
+.dtv-btns{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
 @media(max-width:900px){.layout{flex-direction:column}.app-panel{width:100%}}
 </style>
 </head>
@@ -121,6 +122,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(91,138,245,.04)}
 <div class="modal-overlay" id="snapshotModal"><div class="modal"><div class="modal-header"><h2>スナップショット作成</h2><button class="modal-close" onclick="closeModals()">&times;</button></div><div class="modal-body"><div class="form-group"><label>インスタンス</label><input type="text" id="snapInstance" readonly></div><div class="form-group"><label>コメント（任意）</label><input type="text" id="snapComment" placeholder="例: before-update"></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModals()">キャンセル</button><button class="btn btn-primary" id="snapBtn" onclick="doSnapshot()">作成</button></div></div></div>
 <div class="modal-overlay" id="confirmModal"><div class="modal" style="width:400px"><div class="modal-header"><h2 id="confirmTitle">確認</h2><button class="modal-close" onclick="closeModals()">&times;</button></div><div class="modal-body"><p class="confirm-msg" id="confirmMsg"></p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModals()">キャンセル</button><button class="btn btn-danger" id="confirmBtn">確認</button></div></div></div>
 <div class="modal-overlay" id="gpuModal"><div class="modal" style="width:560px"><div class="modal-header"><h2>GPU パススルー</h2><button class="modal-close" onclick="closeModals()">&times;</button></div><div class="modal-body"><div class="form-group"><label>インスタンス</label><input type="text" id="gpuInstance" readonly></div><div class="form-group"><label>現在の GPU デバイス</label><div id="gpuCurrentList"></div></div><div class="form-group"><label>ホストの利用可能な GPU</label><div id="gpuAvailableList"></div></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModals()">閉じる</button></div></div></div>
+<div class="modal-overlay" id="dtvCreateModal"><div class="modal"><div class="modal-header"><h2>KonomiTV コンテナ作成</h2><button class="modal-close" onclick="closeModals()">&times;</button></div><div class="modal-body"><div class="form-group"><label>コンテナ名</label><input type="text" id="dtvName" value="konomitv" pattern="[a-zA-Z0-9_-]+"></div><label class="checkbox-label"><input type="checkbox" id="dtvUseAuthkey" checked onchange="document.getElementById('dtvAuthkeyGroup').style.display=this.checked?'':'none'"> Tailscale authkey を使用</label><div class="form-group" id="dtvAuthkeyGroup"><label>Tailscale authkey</label><input type="password" id="dtvAuthkey" placeholder="tskey-auth-..." autocomplete="off"></div><label class="checkbox-label"><input type="checkbox" id="dtvSnapTs" checked> スナップショット「TailscaleOK」を作成</label><label class="checkbox-label"><input type="checkbox" id="dtvUsb" checked> USB チューナーをパススルー</label><label class="checkbox-label"><input type="checkbox" id="dtvSnapTuner" checked> スナップショット「TunerOK」を作成</label><div class="checkbox-note">ubuntu:26.04 でコンテナを作成し、/opt/lxd-data マウント・IDマッピング・Tailscale セットアップまで行います（tuner-lxd.sh のドライバ以降の部分）。</div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModals()">キャンセル</button><button class="btn btn-primary" onclick="doDtvCreate()">作成</button></div></div></div>
 <script>
 let instances=[],imageList=[];
 async function api(path,opts={}){const res=await fetch(path,{headers:{'Content-Type':'application/json'},...opts,body:opts.body?JSON.stringify(opts.body):undefined});return res.json()}
@@ -215,8 +217,8 @@ async function showGpuModal(instName){document.getElementById('gpuInstance').val
 function confirmAddGpu(instName,pci,desc){document.getElementById('confirmTitle').textContent='GPU パススルーの追加';document.getElementById('confirmMsg').innerHTML=`GPU <span class="confirm-name">${esc(desc)}</span> (${esc(pci)}) を <span class="confirm-name">${esc(instName)}</span> に追加しますか？<br>GPU パススルーは即座に有効になります（再起動不要）。`;document.getElementById('confirmBtn').className='btn btn-danger';document.getElementById('confirmBtn').onclick=async()=>{closeModals();const w=toastWorking(`GPU を ${instName} に追加中...`);try{const r=await api(`/api/instances/${instName}/gpu/add`,{method:'POST',body:{pci}});if(r.error)throw new Error(r.error);w.done(r.message||'GPU を追加しました');refresh();setTimeout(()=>showGpuModal(instName),600)}catch(e){w.fail(`エラー: ${e.message}`)}};closeModals();document.getElementById('confirmModal').classList.add('active')}
 function confirmRemoveGpu(instName,deviceName){document.getElementById('confirmTitle').textContent='GPU パススルーの取り外し';document.getElementById('confirmMsg').innerHTML=`GPU デバイス <span class="confirm-name">${esc(deviceName)}</span> を <span class="confirm-name">${esc(instName)}</span> から取り外しますか？`;document.getElementById('confirmBtn').className='btn btn-danger';document.getElementById('confirmBtn').onclick=async()=>{closeModals();const w=toastWorking(`GPU を ${instName} から取り外し中...`);try{const r=await api(`/api/instances/${instName}/gpu/remove`,{method:'POST',body:{deviceName}});if(r.error)throw new Error(r.error);w.done('GPU を取り外しました');refresh();setTimeout(()=>showGpuModal(instName),600)}catch(e){w.fail(`エラー: ${e.message}`)}};closeModals();document.getElementById('confirmModal').classList.add('active')}
 // --- アプリ一覧 ---
-let appsData=[],dockerContainers=[];
-async function loadApps(){try{const r=await api('/api/apps');appsData=r.apps||[];dockerContainers=r.dockerContainers||[]}catch(e){appsData=[];dockerContainers=[]}renderApps()}
+let appsData=[],dockerContainers=[],dtvStatus={};
+async function loadApps(){try{const r=await api('/api/apps');appsData=r.apps||[];dockerContainers=r.dockerContainers||[]}catch(e){appsData=[];dockerContainers=[]}try{dtvStatus=await api('/api/dtv/status')}catch(e){dtvStatus={}}renderApps()}
 function appTargetRow(app,r){
   let action;
   if(r.running){
@@ -245,7 +247,7 @@ function renderApps(){
     const opts=pool.length?pool.map(i=>{const n=(typeof i==='string')?i:i.name;return `<option value="${esc(n)}">${esc(n)}</option>`}).join(''):`<option value="">${emptyMsg}</option>`;
     const regs=(app.containers||[]).length?(app.containers||[]).map(r=>appTargetRow(app,r)).join(''):'<div class="app-empty">コンテナを選んで「登録」を押してください</div>';
     return `<div class="app-block"><div class="app-name">${esc(app.label)}${app.requiresDocker?' <span class="app-empty">(Docker)</span>':''}</div><div class="app-row"><select id="${selId}">${opts}</select><button class="btn btn-ghost btn-sm" onclick="registerApp('${esc(app.id)}')">登録</button></div><div class="app-registered">${regs}</div></div>`;
-  }).join('');
+  }).join('')+renderKonomiBlock();
   appsData.forEach(app=>{const s=document.getElementById(`sel-${app.id}`);if(s&&prev[s.id]&&[...s.options].some(o=>o.value===prev[s.id]))s.value=prev[s.id]});
 }
 async function registerApp(appId){
@@ -288,17 +290,97 @@ async function doInstallApp(appId,container){
     finishCreateProgress(false,'エラー: '+e.message);
   }
 }
+// --- KonomiTV (DTV) セットアップ ---
+// ほかのアプリと異なりコンテナ選択は行わない。ホスト側ドライバ導入 →
+// 専用コンテナ作成 → コンテナ内アプリ一式 → 管理ダッシュボード、の順で実行する。
+function renderKonomiBlock(){
+  const c=(dtvStatus&&dtvStatus.container)||'';
+  const status=c?(dtvStatus.exists===false?`対象コンテナ: ${esc(c)}（未作成）`:`対象コンテナ: ${esc(c)}`):'未作成 — 「コンテナ作成」を実行してください';
+  return `<div class="app-block"><div class="app-name">KonomiTV</div><div class="dtv-btns"><button class="btn btn-ghost btn-sm" onclick="confirmDtvDriver()">px4_drvインストール</button><button class="btn btn-primary btn-sm" onclick="showDtvCreate()">コンテナ作成</button><button class="btn btn-primary btn-sm" onclick="confirmDtvAppInstall()">アプリインストール</button><button class="btn btn-ghost btn-sm" onclick="confirmDtvManage()">DTV管理</button></div><div class="app-empty">${status}</div><div class="checkbox-note">px4_drvインストール → コンテナ作成 → アプリインストール → DTV管理 の順で実行します</div></div>`;
+}
+function askConfirm(title,msg,fn,okClass='btn-primary'){
+  document.getElementById('confirmTitle').textContent=title;
+  document.getElementById('confirmMsg').innerHTML=msg;
+  document.getElementById('confirmBtn').className='btn '+okClass;
+  document.getElementById('confirmBtn').onclick=()=>{closeModals();fn()};
+  document.getElementById('confirmModal').classList.add('active');
+}
+async function confirmDtvStatus(){
+  try{const st=await api('/api/dtv/status');if(st&&st.container)dtvStatus=st}catch(e){}
+}
+async function confirmDtvDriver(){
+  askConfirm('px4_drv インストール','ホストにチューナードライバ (<span class="confirm-name">px4_drv</span>) をインストールします。<br>~/dtv に mirakc-edcb-konomitv リポジトリを取得し、tuner-lxd.sh のドライバ部分のみ実行します。',async()=>{
+    await runDtvStream('/api/dtv/driver/stream',{},'KonomiTV セットアップ','px4_drv ドライバ @ ホスト');
+  });
+}
+function showDtvCreate(){
+  if(!dtvStatus.container)void confirmDtvStatus();
+  document.getElementById('dtvName').value='konomitv';
+  document.getElementById('dtvUseAuthkey').checked=true;
+  document.getElementById('dtvAuthkeyGroup').style.display='';
+  document.getElementById('dtvAuthkey').value='';
+  document.getElementById('dtvSnapTs').checked=true;
+  document.getElementById('dtvUsb').checked=true;
+  document.getElementById('dtvSnapTuner').checked=true;
+  document.getElementById('dtvCreateModal').classList.add('active');
+}
+async function doDtvCreate(){
+  const n=document.getElementById('dtvName').value.trim();
+  if(!n){toast('コンテナ名を入力してください','error');return}
+  const useAuthkey=document.getElementById('dtvUseAuthkey').checked;
+  const authkey=(document.getElementById('dtvAuthkey').value||'').trim();
+  if(useAuthkey&&!authkey){toast('Tailscale の authkey を入力してください','error');return}
+  const body={name:n,useAuthkey,authkey,snapTailscale:document.getElementById('dtvSnapTs').checked,usbPassthrough:document.getElementById('dtvUsb').checked,snapTuner:document.getElementById('dtvSnapTuner').checked};
+  closeModals();
+  await runDtvStream('/api/dtv/container/stream',body,'KonomiTV セットアップ',`コンテナ作成: ${n}`);
+}
+async function confirmDtvAppInstall(){
+  await confirmDtvStatus();
+  const c=dtvStatus&&dtvStatus.container;
+  if(!c){toast('先に「コンテナ作成」を実行してください','error');return}
+  askConfirm('KonomiTV アプリ インストール',`<span class="confirm-name">${esc(c)}</span> 内で install-mirakc-edcb-konomitv.sh を実行します。<br>B-CAS キー入力などの対話操作が必要なため、ターミナルが開きます。`,()=>openTerminal(c,'bash ~/install-mirakc-edcb-konomitv.sh'));
+}
+async function confirmDtvManage(){
+  await confirmDtvStatus();
+  const c=dtvStatus&&dtvStatus.container;
+  if(!c){toast('先に「コンテナ作成」を実行してください','error');return}
+  askConfirm('DTV管理ダッシュボード',`<span class="confirm-name">${esc(c)}</span> 内に DTV管理ダッシュボードをインストールしますか？<br>ポート 80 で HTTP サーバーを起動します。`,async()=>{
+    await runDtvStream('/api/dtv/manage/stream',{container:c},'DTV管理 インストール',c);
+  });
+}
+async function runDtvStream(url,body,title,target){
+  const panel=document.getElementById('createProgressPanel');panel.classList.add('active');
+  document.getElementById('cpPanelTitle').textContent=title;
+  document.getElementById('cpInstanceName').textContent=target;
+  document.getElementById('createProgressLog').innerHTML='';
+  document.getElementById('cpStatusText').textContent='実行中...';
+  document.getElementById('cpSpinner').style.display='';
+  try{
+    const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+    if(!res.ok){const err=await res.json();throw new Error(err.error||'Request failed')}
+    const reader=res.body.getReader();const decoder=new TextDecoder();let buffer='',errMsg=null,evt='';
+    while(true){const{done,value}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const lines=buffer.split('\n');buffer=lines.pop();for(const line of lines){if(line.startsWith('event:')){evt=line.slice(6).trim()}else if(line.startsWith('data:')){try{const d=JSON.parse(line.slice(5));if(d.message)appendCreateLog(d.message);if(evt==='error'&&d.error)errMsg=d.error}catch(e){}}}}
+    if(errMsg)throw new Error(errMsg);
+    finishCreateProgress(true,'完了');
+    return true;
+  }catch(e){
+    appendCreateLog('エラー: '+e.message);
+    finishCreateProgress(false,'エラー: '+e.message);
+    return false;
+  }
+}
 function closeModals(){document.querySelectorAll('.modal-overlay').forEach(m=>m.classList.remove('active'))}
 document.querySelectorAll('.modal-overlay').forEach(m=>{m.addEventListener('click',e=>{if(e.target===m)closeModals()})});
 
 // --- Terminal (xterm.js + WebSocket) ---
-let term=null, termWs=null, termAddonFit=null;
-function openTerminal(name){
+let term=null, termWs=null, termAddonFit=null, termRunCmd=null, termTarget=null;
+function openTerminal(name,runCmd){
   if(termWs){termWs.close();termWs=null}
   if(term){term.dispose();term=null}
+  termTarget=name;termRunCmd=runCmd||null;
   const panel=document.getElementById('terminalPanel');
   panel.classList.add('active');
-  document.getElementById('termInstanceName').textContent=name;
+  document.getElementById('termInstanceName').textContent=runCmd?`${name}（スクリプト実行中）`:name;
   const container=document.getElementById('terminalContainer');
   container.innerHTML='';
   term=new Terminal({cursorBlink:true,fontSize:14,fontFamily:"'SF Mono',Consolas,'Courier New',monospace",theme:{background:'#0d1117',foreground:'#c9d1d9',cursor:'#58a6ff',selectionBackground:'rgba(56,139,253,0.4)',black:'#0d1117',red:'#f85149',green:'#3fb950',yellow:'#d29922',blue:'#58a6ff',magenta:'#bc8cff',cyan:'#39c5cf',white:'#c9d1d9',brightBlack:'#6e7681',brightRed:'#f85149',brightGreen:'#3fb950',brightYellow:'#d29922',brightBlue:'#58a6ff',brightMagenta:'#bc8cff',brightCyan:'#56d4dd',brightWhite:'#f0f6fc'}});
@@ -309,7 +391,12 @@ function openTerminal(name){
 }
 function connectTermWs(name){
   const proto=location.protocol==='https:'?'wss:':'ws:';
-  termWs=new WebSocket(`${proto}//${location.host}/ws/terminal?instance=${encodeURIComponent(name)}&cols=${term.cols}&rows=${term.rows}`);
+  let wsUrl=`${proto}//${location.host}/ws/terminal?instance=${encodeURIComponent(name)}&cols=${term.cols}&rows=${term.rows}`;
+  if(termRunCmd){
+    const b64=btoa(unescape(encodeURIComponent(termRunCmd))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+    wsUrl+=`&run=${encodeURIComponent(b64)}`;
+  }
+  termWs=new WebSocket(wsUrl);
   term.onData(d=>{if(termWs&&termWs.readyState===WebSocket.OPEN)termWs.send(JSON.stringify({type:'input',data:d}))});
   term.onResize(({cols,rows})=>{if(termWs&&termWs.readyState===WebSocket.OPEN)termWs.send(JSON.stringify({type:'resize',cols,rows}))});
   termWs.onmessage=e=>{try{const m=JSON.parse(e.data);if(m.type==='output')term.write(m.data);if(m.type==='exit')term.write('\r\n[セッション終了]\r\n')}catch(ex){}};
@@ -324,19 +411,20 @@ function termFit(){
   }
 }
 async function resetTerminal(){
-  const name=document.getElementById('termInstanceName').textContent;
+  const name=termTarget;
   if(!name)return;
   try{await fetch(`/api/terminal/reset/${encodeURIComponent(name)}`,{method:'POST'})}catch(e){}
   if(termWs){termWs.close();termWs=null}
   if(term){term.dispose();term=null}
   termAddonFit=null;
-  openTerminal(name);
+  openTerminal(name,termRunCmd);
 }
 function closeTerminal(){
   document.getElementById('terminalPanel').classList.remove('active');
   if(termWs){termWs.close();termWs=null}
   if(term){term.dispose();term=null}
   termAddonFit=null;
+  termRunCmd=null;termTarget=null;
 }
 (function(){
   const handle=document.getElementById('termDragHandle');

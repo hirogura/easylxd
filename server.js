@@ -1,4 +1,5 @@
 const http = require('http');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -7,9 +8,9 @@ const pty = require('node-pty');
 
 const PORT = 3329;
 
-function run(cmd, args = [], timeout = 120000, onData = null) {
+function run(cmd, args = [], timeout = 120000, onData = null, env = undefined) {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { timeout, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(cmd, args, { timeout, stdio: ['ignore', 'pipe', 'pipe'], env: env ? { ...process.env, ...env } : undefined });
     let stdout = '', stderr = '';
     child.stdout.on('data', d => { stdout += d; if (onData) onData(d); });
     child.stderr.on('data', d => { stderr += d; if (onData) onData(d); });
@@ -61,6 +62,18 @@ function parseBody(req) {
 function json(res, code, obj) {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(obj));
+}
+
+// SSE (Server-Sent Events) レスポンスを開始し、log/done/error イベント送信関数を返す。
+function sseStart(res) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  });
+  res.write(':\n\n');
+  return (evt, data) => { try { res.write(`event: ${evt}\ndata: ${JSON.stringify(data)}\n\n`); } catch (e) {} };
 }
 
 // Tailscale IP (CGNAT 100.64.0.0/10) が tailscale0 に割り当てられているか。
@@ -671,6 +684,205 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // --- KonomiTV (DTV) セットアップ ---
+  // ほかのアプリと異なりコンテナ選択を行わない専用フロー。
+  // ホスト側スクリプト tuner-lxd.sh は対話式（y/n プロンプト・コンテナ名/authkey 入力）のため、
+  // セクション見出しコメントを境界に awk で分割し、
+  //   stage1 = ドライバ部分（セクション1まで）  …「px4_drvインストール」ボタン
+  //   stage2 = 残り（セクション2以降・プロローグ再結合） …「コンテナ作成」ボタン
+  // として実行する。対話への回答は標準入力ファイル経由で与える
+  // （authkey もファイル経由のためログには流れない）。
+  const DTV_REPO_URL = 'https://github.com/hirogura/mirakc-edcb-konomitv.git';
+  const DTV_MANAGE_URL = 'https://raw.githubusercontent.com/hirogura/mirakc-edcb-konomitv/main/install-dtv-manage.sh';
+  // 分割位置は tuner-lxd.sh のセクション見出しコメントで判定（index で前方一致比較）。
+  const DTV_AWK_STAGE1 = 'index($0,"# 2. コンテナ名の入力")==1{exit}\n{print}';
+  const DTV_AWK_STAGE2 = [
+    'index($0,"# 1. チューナードライバのインストール")==1{skip=1}',
+    'index($0,"# 2. コンテナ名の入力")==1{skip=0}',
+    'skip!=1{print}'
+  ].join('\n');
+  // tuner-lxd.sh の対話プロンプト (read) を横取りし、あらかじめ用意した回答キューから
+  // 1行ずつ返すランナー。stdin を /dev/null に保って実行することで、回答ファイルを
+  // 標準入力に流す方式で起きていた「残りの回答行が lxc コマンドの YAML 設定入力と
+  // して解釈される」問題 (api.InstancePut unmarshal エラー) を防ぐ。
+  const DTV_RUNNER_B64 = Buffer.from([
+    '#!/bin/bash',
+    'set -euo pipefail',
+    'mapfile -t DTV_QUEUE < "$DTV_ANSWERS"',
+    'DTV_QIDX=0',
+    'read() {',
+    '  local var=""',
+    '  while [ $# -gt 0 ]; do',
+    '    case "$1" in',
+    '      -*p*) shift; shift ;;',
+    '      -*) shift ;;',
+    '      *) var="$1"; break ;;',
+    '    esac',
+    '  done',
+    '  if [ "$DTV_QIDX" -ge "${#DTV_QUEUE[@]}" ]; then return 1; fi',
+    "  printf -v \"$var\" '%s' \"${DTV_QUEUE[$DTV_QIDX]}\"",
+    '  DTV_QIDX=$((DTV_QIDX + 1))',
+    '}',
+    '. "$DTV_STAGE"',
+    'exit 0'
+  ].join('\n'), 'utf-8').toString('base64');
+  const DTV_STATE_FILE = path.join(__dirname, 'dtv.json');
+
+  function readDtvState() {
+    try { return JSON.parse(fs.readFileSync(DTV_STATE_FILE, 'utf-8')); } catch (e) { return {}; }
+  }
+  function writeDtvState(st) {
+    fs.writeFileSync(DTV_STATE_FILE, JSON.stringify(st, null, 2) + '\n');
+  }
+
+  if (pathname === '/api/dtv/status' && req.method === 'GET') {
+    try {
+      const st = readDtvState();
+      const name = st.container || null;
+      let exists = false;
+      if (name) exists = !!(await getInstance(name).catch(() => null));
+      return json(res, 200, { container: name, exists });
+    } catch (e) { return json(res, 500, { error: e.message }); }
+  }
+
+  // 「px4_drvインストール」ボタン: ~/dtv にリポジトリを取得し、tuner-lxd.sh の
+  // ドライバ部分のみホスト上で実行する。対話プロンプトには全て y で回答する
+  // （既存 .deb の再利用 / 新バージョンの取得、どちらの分岐でも最新側を選択）。
+  if (pathname === '/api/dtv/driver/stream' && req.method === 'POST') {
+    const send = sseStart(res);
+    try {
+      send('log', { message: '=== KonomiTV セットアップ (1/4): px4_drv ドライバのインストール ===' });
+      const script = [
+        'set -euo pipefail',
+        'export PATH="/snap/bin:$PATH"',
+        // systemd 経由の起動では HOME が未設定のため /root にフォールバックする。
+        'DTV_DIR="${HOME:-/root}/dtv"',
+        'if [ -d "$DTV_DIR/.git" ]; then',
+        '  echo "既存のリポジトリを最新化中..."',
+        '  git -C "$DTV_DIR" fetch origin main',
+        '  git -C "$DTV_DIR" reset --hard origin/main',
+        'else',
+        `  git clone ${DTV_REPO_URL} "$DTV_DIR"`,
+        'fi',
+        'cd "$DTV_DIR"',
+        'STAGE=$(mktemp /tmp/easylxd-dtv-stage1.XXXXXXXX.sh)',
+        'RUNNER=$(mktemp /tmp/easylxd-dtv-runner.XXXXXXXX.sh)',
+        'ANSWERS=$(mktemp /tmp/easylxd-dtv-answer.XXXXXXXX.txt)',
+        'chmod 600 "$ANSWERS"',
+        "trap 'rm -f \"$STAGE\" \"$RUNNER\" \"$ANSWERS\"' EXIT",
+        `awk '${DTV_AWK_STAGE1}' tuner-lxd.sh > "$STAGE"`,
+        'grep -q px4_drv "$STAGE" || { echo "ERROR: tuner-lxd.sh からドライバ部分を抽出できませんでした"; exit 1; }',
+        'if grep -q "コンテナ名を入力" "$STAGE"; then echo "ERROR: tuner-lxd.sh の分割に失敗しました"; exit 1; fi',
+        `echo ${DTV_RUNNER_B64} | base64 -d > "$RUNNER"`,
+        // 対話プロンプト（ドライバインストール可否・既存 .deb 再利用/新バージョン取得）には y で回答。
+        "printf 'y\\ny\\n' > \"$ANSWERS\"",
+        'echo "--- tuner-lxd.sh のドライバ部分を実行 ---"',
+        'DTV_ANSWERS="$ANSWERS" DTV_STAGE="$STAGE" bash "$RUNNER" < /dev/null',
+        'echo "px4_drv ドライバのインストールが完了しました"'
+      ].join('\n');
+      await run('bash', ['-c', script], 1800000, streamToLog(msg => send('log', { message: msg })));
+      send('done', { message: 'ドライバインストール完了 — 続いて「コンテナ作成」を実行してください' });
+    } catch (e) {
+      send('error', { error: e.message });
+    }
+    res.end();
+    return;
+  }
+
+  // 「コンテナ作成」ボタン: driver ステップの続きとして tuner-lxd.sh の残りを実行する。
+  // 回答の並びはスクリプトの読み込み順どおり:
+  //   コンテナ名 → authkey 有無 → authkey → TailscaleOK → USBパススルー → TunerOK
+  //   → 「今すぐインストールスクリプトを実行」は n（後続の「アプリインストール」ボタンで実施）
+  if (pathname === '/api/dtv/container/stream' && req.method === 'POST') {
+    const send = sseStart(res);
+    try {
+      const body = await parseBody(req);
+      const name = String(body.name || '').trim();
+      if (!/^[a-zA-Z0-9_-]+$/.test(name)) throw new Error('コンテナ名が不正です（英数字と - _ のみ使用可）');
+      const useAuthkey = !!body.useAuthkey;
+      const authkey = String(body.authkey || '').replace(/[\r\n]/g, '').trim();
+      if (useAuthkey && !authkey) throw new Error('Tailscale の authkey が入力されていません');
+      const snapTs = body.snapTailscale === false ? 'n' : 'y';
+      const usbPass = body.usbPassthrough === false ? 'n' : 'y';
+      const snapTuner = body.snapTuner === false ? 'n' : 'y';
+      send('log', { message: `=== KonomiTV セットアップ (2/4): コンテナ '${name}' の作成 ===` });
+      const script = [
+        'set -euo pipefail',
+        'export PATH="/snap/bin:$PATH"',
+        // systemd 経由の起動では HOME が未設定のため /root にフォールバックする。
+        'DTV_DIR="${HOME:-/root}/dtv"',
+        'if [ ! -f "$DTV_DIR/tuner-lxd.sh" ]; then',
+        '  echo "ERROR: $DTV_DIR/tuner-lxd.sh が見つかりません。先に「px4_drvインストール」を実行してください。"',
+        '  exit 1',
+        'fi',
+        'cd "$DTV_DIR"',
+        'STAGE=$(mktemp /tmp/easylxd-dtv-stage2.XXXXXXXX.sh)',
+        'RUNNER=$(mktemp /tmp/easylxd-dtv-runner.XXXXXXXX.sh)',
+        'ANSWERS=$(mktemp /tmp/easylxd-dtv-answer.XXXXXXXX.txt)',
+        'chmod 600 "$ANSWERS"',
+        "trap 'rm -f \"$STAGE\" \"$RUNNER\" \"$ANSWERS\"' EXIT",
+        `awk '${DTV_AWK_STAGE2}' tuner-lxd.sh > "$STAGE"`,
+        'grep -q "コンテナ名を入力" "$STAGE" || { echo "ERROR: tuner-lxd.sh からコンテナ作成部分を抽出できませんでした"; exit 1; }',
+        'if grep -q px4_drv "$STAGE"; then echo "ERROR: tuner-lxd.sh の分割に失敗しました"; exit 1; fi',
+        `echo ${DTV_RUNNER_B64} | base64 -d > "$RUNNER"`,
+        '{',
+        '  printf \'%s\\n\' "$DTV_NAME"',
+        '  printf \'%s\\n\' "$DTV_USEKEY"',
+        '  if [ "$DTV_USEKEY" = "y" ]; then printf \'%s\\n\' "$DTV_AUTHKEY"; fi',
+        '  printf \'%s\\n\' "$DTV_SNAPTS" "$DTV_USB" "$DTV_SNAPTUNER" n',
+        '} > "$ANSWERS"',
+        'echo "--- コンテナ作成・マウント・Tailscale・スナップショット設定 ---"',
+        'DTV_ANSWERS="$ANSWERS" DTV_STAGE="$STAGE" bash "$RUNNER" < /dev/null',
+        'echo "コンテナ作成ステップが完了しました"'
+      ].join('\n');
+      await run('bash', ['-c', script], 3600000, streamToLog(msg => send('log', { message: msg }), ''), {
+        DTV_NAME: name,
+        DTV_USEKEY: useAuthkey ? 'y' : 'n',
+        DTV_AUTHKEY: authkey,
+        DTV_SNAPTS: snapTs,
+        DTV_USB: usbPass,
+        DTV_SNAPTUNER: snapTuner
+      });
+      const st = readDtvState(); st.container = name; writeDtvState(st);
+      send('done', { message: `コンテナ '${name}' の作成完了 — 続いて「アプリインストール」を実行してください` });
+    } catch (e) {
+      send('error', { error: e.message });
+    }
+    res.end();
+    return;
+  }
+
+  // 「DTV管理」ボタン: コンテナ内で dtv-manage ダッシュボードのインストーラを実行する。
+  if (pathname === '/api/dtv/manage/stream' && req.method === 'POST') {
+    const send = sseStart(res);
+    try {
+      const body = await parseBody(req);
+      const st = readDtvState();
+      const container = String(body.container || st.container || '').trim();
+      if (!container) throw new Error('対象コンテナが不明です。先に「コンテナ作成」を実行してください。');
+      const inst = await getInstance(container);
+      if (inst.status !== 'Running') throw new Error(`コンテナ ${container} が停止しています`);
+      send('log', { message: `=== KonomiTV セットアップ (4/4): ${container} に DTV管理ダッシュボードをインストール ===` });
+      const cmd = `bash <(curl -fsSL ${DTV_MANAGE_URL})`;
+      send('log', { message: `$ lxc exec ${container} -- bash -c "${cmd}"` });
+      await lxcExec(container, cmd, 1800000, streamToLog(msg => send('log', { message: msg })));
+      let ip = '';
+      const net = (inst.state && inst.state.network) || {};
+      for (const [iface, info] of Object.entries(net)) {
+        if (iface === 'lo') continue;
+        for (const a of info.addresses || []) {
+          if (a.family === 'inet' && a.scope === 'global') { ip = a.address; break; }
+        }
+        if (ip) break;
+      }
+      send('done', { message: `DTV管理ダッシュボードのインストール完了${ip ? ` — http://${ip}/` : ''}` });
+    } catch (e) {
+      send('error', { error: e.message });
+    }
+    res.end();
+    return;
+  }
+
   const SECURITY_KEYS = { nesting: 'security.nesting', privileged: 'security.privileged' };
   const securityMatch = pathname.match(/^\/api\/instances\/([^/]+)\/security$/);
   if (securityMatch && req.method === 'POST') {
@@ -773,7 +985,19 @@ wss.on('connection', (ws, req) => {
   const cols = parseInt(url.searchParams.get('cols')) || 80;
   const rows = parseInt(url.searchParams.get('rows')) || 24;
 
-  let session = activeTerminals.get(instanceName);
+  // run 指定時は通常シェルの代わりに指定コマンドをコンテナ内で実行する。
+  // KonomiTV のインストールスクリプトのように B-CAS キー入力など対話操作が
+  // 必要なスクリプト向け（通常のシェルセッションとは別キーで管理）。
+  const runParam = url.searchParams.get('run');
+  const runCmd = runParam ? Buffer.from(runParam, 'base64url').toString('utf-8') : null;
+  const sessionKey = runCmd
+    ? `${instanceName}::run:${crypto.createHash('sha256').update(runCmd).digest('hex').slice(0, 12)}`
+    : instanceName;
+  const ptyArgs = runCmd
+    ? ['exec', instanceName, '--', 'bash', '-c', runCmd]
+    : ['exec', instanceName, '--', '/bin/bash'];
+
+  let session = activeTerminals.get(sessionKey);
 
   if (session) {
     if (session.graceTimer) { clearTimeout(session.graceTimer); session.graceTimer = null; }
@@ -785,7 +1009,7 @@ wss.on('connection', (ws, req) => {
   } else {
     let term;
     try {
-      term = pty.spawn('lxc', ['exec', instanceName, '--', '/bin/bash'], {
+      term = pty.spawn('lxc', ptyArgs, {
         name: 'xterm-256color',
         cols, rows,
         cwd: process.env.HOME || '/root',
@@ -793,7 +1017,7 @@ wss.on('connection', (ws, req) => {
       });
     } catch (e) { ws.close(); return; }
     session = { term, clients: new Set([ws]), resizeTimeout: null, buffer: '', graceTimer: null };
-    activeTerminals.set(instanceName, session);
+    activeTerminals.set(sessionKey, session);
     term.onData(data => {
       session.buffer += data;
       if (session.buffer.length > MAX_BUFFER) {
@@ -807,7 +1031,7 @@ wss.on('connection', (ws, req) => {
       for (const c of session.clients) {
         try { c.send(JSON.stringify({ type: 'exit' })); } catch (e) {}
       }
-      activeTerminals.delete(instanceName);
+      activeTerminals.delete(sessionKey);
     });
   }
 
@@ -829,7 +1053,7 @@ wss.on('connection', (ws, req) => {
     session.clients.delete(ws);
     if (session.clients.size === 0) {
       session.graceTimer = setTimeout(() => {
-        if (session.clients.size === 0) killSession(session, instanceName);
+        if (session.clients.size === 0) killSession(session, sessionKey);
       }, SESSION_GRACE_MS);
     }
   };
