@@ -65,13 +65,20 @@ function json(res, code, obj) {
 
 async function getInstances() {
   const { stdout } = await lxc('list', '--format', 'json');
-  return JSON.parse(stdout).map(c => ({
-    name: c.name, status: c.status, ephemeral: c.ephemeral, type: c.type,
-    architecture: c.architecture, created_at: c.created_at, profiles: c.profiles,
-    devices: c.devices || {},
-    state: c.state ? { status: c.state.status, pid: c.state.pid, memory: c.state.memory, disk: c.state.disk, cpu: c.state.cpu, network: c.state.network } : null,
-    snapshots: c.snapshots || []
-  }));
+  return JSON.parse(stdout).map(c => {
+    const cfg = c.config || {};
+    return {
+      name: c.name, status: c.status, ephemeral: c.ephemeral, type: c.type,
+      architecture: c.architecture, created_at: c.created_at, profiles: c.profiles,
+      devices: c.devices || {},
+      security: {
+        nesting: cfg['security.nesting'] === 'true',
+        privileged: cfg['security.privileged'] === 'true'
+      },
+      state: c.state ? { status: c.state.status, pid: c.state.pid, memory: c.state.memory, disk: c.state.disk, cpu: c.state.cpu, network: c.state.network } : null,
+      snapshots: c.snapshots || []
+    };
+  });
 }
 
 async function getInstance(name) {
@@ -458,6 +465,24 @@ const server = http.createServer(async (req, res) => {
       const newDevices = { ...devices }; delete newDevices[body.deviceName];
       await lxdUpdateInstance(name, { devices: newDevices });
       return json(res, 200, { ok: true, message: `GPU device ${body.deviceName} removed` });
+    } catch (e) { return json(res, 500, { error: e.message }); }
+  }
+
+  const SECURITY_KEYS = { nesting: 'security.nesting', privileged: 'security.privileged' };
+  const securityMatch = pathname.match(/^\/api\/instances\/([^/]+)\/security$/);
+  if (securityMatch && req.method === 'POST') {
+    const [, name] = securityMatch;
+    try {
+      const body = await parseBody(req);
+      const lxdKey = SECURITY_KEYS[body.key];
+      if (!lxdKey) return json(res, 400, { error: 'key must be one of: nesting, privileged' });
+      if (typeof body.enabled !== 'boolean') return json(res, 400, { error: 'enabled must be a boolean' });
+      // 特権設定は次回起動時から反映されるため、起動中の場合は再起動を促すメッセージを返す。
+      let wasRunning = false;
+      try { const { stdout } = await lxc('info', name); wasRunning = /Status:\s*RUNNING/.test(stdout); } catch (e) {}
+      if (body.enabled) await lxc('config', 'set', name, lxdKey, 'true');
+      else await lxc('config', 'unset', name, lxdKey);
+      return json(res, 200, { ok: true, message: `${lxdKey} ${body.enabled ? 'allowed' : 'denied'} for ${name}`, running: wasRunning });
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
 
