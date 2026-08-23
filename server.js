@@ -471,19 +471,32 @@ const server = http.createServer(async (req, res) => {
   // --- アプリ一覧 ---
   // 登録情報は apps.json に永続化する（ランタイムデータのためリポジトリ外管理）。
   // アプリの追加は APP_REGISTRY にエントリを足すだけでよい。
+  // installCmds は対象コンテナ内で順に実行されるコマンド列（lxc exec の作業ディレクトリは /root）。
   const APPS_FILE = path.join(__dirname, 'apps.json');
   const APP_REGISTRY = {
     selfexplorer: {
       label: 'SelfExplorer',
       installDir: '/opt/selfexplorer',
       port: 3346,
-      installScriptUrl: 'https://raw.githubusercontent.com/hirogura/selfexplorer/main/install-selfexplorer1.sh'
+      installCmds: ['sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/hirogura/selfexplorer/main/install-selfexplorer1.sh)"']
     },
     selfnote: {
       label: 'SelfNote',
       installDir: '/opt/selfnote',
       port: 3342,
-      installScriptUrl: 'https://raw.githubusercontent.com/hirogura/selfnote/main/install-selfnote.sh'
+      installCmds: ['sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/hirogura/selfnote/main/install-selfnote.sh)"']
+    },
+    selfrss: {
+      label: 'selfrss',
+      installDir: '/opt/selfrss',
+      port: 3347,
+      installCmds: [
+        // 再インストールに備え clone 先を初期化してから指定コマンドを実行する。
+        'rm -rf selfrss',
+        'git clone https://github.com/hirogura/selfrss.git',
+        'cd selfrss',
+        'sudo bash install-selfrss1.sh'
+      ]
     }
   };
 
@@ -573,11 +586,9 @@ const server = http.createServer(async (req, res) => {
       const body = await parseBody(req);
       if (!body.container) { send('error', { error: 'container is required' }); res.end(); return; }
       await getInstance(body.container);
-      // 対象コンテナ内で各アプリの公式インストールスクリプトを実行する。
-      const installCmd = `sudo bash -c "$(curl -fsSL ${cfg.installScriptUrl})"`;
       send('log', { message: `=== ${body.container} へ ${cfg.label} をインストール開始 ===` });
-      send('log', { message: installCmd });
-      await lxcExec(body.container, installCmd, 1800000, streamToLog(msg => send('log', { message: msg })));
+      cfg.installCmds.forEach(l => send('log', { message: `$ ${l}` }));
+      await lxcExec(body.container, cfg.installCmds.join('\n'), 1800000, streamToLog(msg => send('log', { message: msg })));
       const installed = await isAppInstalled(body.container, cfg);
       send('done', { message: installed ? `${cfg.label} のインストールが完了しました` : `スクリプトは終了しましたが ${cfg.installDir} が見つかりません` });
     } catch (e) {
