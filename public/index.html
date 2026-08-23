@@ -241,7 +241,8 @@ function renderApps(){
     const selId=`sel-${esc(app.id)}`;
     const pool=app.requiresDocker?dockerContainers:running;
     const emptyMsg=app.requiresDocker?'Dockerが動作する稼働中コンテナがありません':'稼働中のコンテナがありません';
-    const opts=pool.length?pool.map(i=>`<option value="${esc(i.name)}">${esc(i.name)}</option>`).join(''):`<option value="">${emptyMsg}</option>`;
+    // dockerContainers はサーバーから文字列配列で届くため name 抽出は両対応する。
+    const opts=pool.length?pool.map(i=>{const n=(typeof i==='string')?i:i.name;return `<option value="${esc(n)}">${esc(n)}</option>`}).join(''):`<option value="">${emptyMsg}</option>`;
     const regs=(app.containers||[]).length?(app.containers||[]).map(r=>appTargetRow(app,r)).join(''):'<div class="app-empty">コンテナを選んで「登録」を押してください</div>';
     return `<div class="app-block"><div class="app-name">${esc(app.label)}${app.requiresDocker?' <span class="app-empty">(Docker)</span>':''}</div><div class="app-row"><select id="${selId}">${opts}</select><button class="btn btn-ghost btn-sm" onclick="registerApp('${esc(app.id)}')">登録</button></div><div class="app-registered">${regs}</div></div>`;
   }).join('');
