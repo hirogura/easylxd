@@ -553,6 +553,12 @@ const server = http.createServer(async (req, res) => {
         'sudo bash install-rclonegui.sh'
       ]
     },
+    rsyncgui: {
+      label: 'rsyncGUI',
+      installDir: '/opt/rsyncgui',
+      port: 3326,
+      installCmds: ['curl -fsSL https://raw.githubusercontent.com/hirogura/rsyncgui/main/install-rsyncgui.sh | sudo bash']
+    },
     immich: {
       label: 'immich',
       installDir: '/opt/docker/immich',
