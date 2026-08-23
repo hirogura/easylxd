@@ -507,6 +507,16 @@ const server = http.createServer(async (req, res) => {
         'curl -fsSL -o install-selfmark1.sh https://raw.githubusercontent.com/hirogura/selfmark/main/install-selfmark1.sh',
         'sudo bash install-selfmark1.sh'
       ]
+    },
+    spw: {
+      label: 'SPW',
+      installDir: '/opt/lxd-data/spw',
+      // アプリ本体は3345で待機し、Tailscale Serve (HTTPS) が3344で公開する。
+      port: 3344,
+      installCmds: [
+        'curl -fsSL https://raw.githubusercontent.com/hirogura/spw/main/install-spw.sh -o install-spw.sh',
+        'sudo bash install-spw.sh'
+      ]
     }
   };
 
