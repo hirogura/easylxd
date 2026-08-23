@@ -517,7 +517,7 @@ const server = http.createServer(async (req, res) => {
         const running = !!inst && inst.status === 'Running';
         const installed = running ? await isSelfExplorerInstalled(name) : null;
         const dns = running && installed ? await getTailscaleDnsName(name) : '';
-        return { container: name, running, installed, url: dns ? `https://${dns}:3342/` : null };
+        return { container: name, running, installed, url: dns ? `https://${dns}:3346/` : null };
       }));
       return json(res, 200, { containers: result });
     } catch (e) { return json(res, 500, { error: e.message }); }
