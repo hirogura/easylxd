@@ -972,6 +972,24 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { ok: true, message: `No active session for ${instName}` });
   }
 
+  // --- アクティブなターミナルセッション一覧 ---
+  // ターミナルは共有セッション（replay buffer 付き・最終切断後も SESSION_GRACE_MS 保持）のため、
+  // 別 PC からでも同じキーで接続し直せばバッファ再生つきで合流できる。
+  // tail にバッファ末尾を含めることで、接続せずとも進行状況を覗き見できるようにしている。
+  if (pathname === '/api/terminals' && req.method === 'GET') {
+    const sessions = [];
+    for (const s of activeTerminals.values()) {
+      sessions.push({
+        instance: s.instanceName || null,
+        runCmd: s.runCmd || null,
+        clients: s.clients ? s.clients.size : 0,
+        startedAt: s.startedAt || null,
+        tail: s.buffer ? s.buffer.slice(-2000) : ''
+      });
+    }
+    return json(res, 200, { sessions });
+  }
+
   json(res, 404, { error: 'Not found' });
 });
 
@@ -1016,7 +1034,7 @@ wss.on('connection', (ws, req) => {
         env: { ...process.env, TERM: 'xterm-256color', LC_ALL: 'en_US.UTF-8' }
       });
     } catch (e) { ws.close(); return; }
-    session = { term, clients: new Set([ws]), resizeTimeout: null, buffer: '', graceTimer: null };
+    session = { term, clients: new Set([ws]), resizeTimeout: null, buffer: '', graceTimer: null, instanceName, runCmd, startedAt: Date.now() };
     activeTerminals.set(sessionKey, session);
     term.onData(data => {
       session.buffer += data;

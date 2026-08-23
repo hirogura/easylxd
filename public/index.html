@@ -75,6 +75,9 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(91,138,245,.04)}
 .gpu-item .gpu-current{border-color:var(--green);background:rgba(61,214,140,.08)}.gpu-item .gpu-current .gpu-label{color:var(--green);font-size:12px;font-weight:600}
 .gpu-item .gpu-remove{color:var(--red);cursor:pointer;font-size:13px}.gpu-item .gpu-remove:hover{text-decoration:underline}
 .gpu-item.clickable{cursor:pointer}.gpu-item.clickable:hover{border-color:var(--accent);background:rgba(91,138,245,.08)}
+.term-tail{background:#0d1117;border:1px solid var(--border);border-radius:6px;padding:8px;margin-top:8px;font-family:'SF Mono',Consolas,'Courier New',monospace;font-size:12px;line-height:1.5;max-height:160px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;color:#c9d1d9}
+.term-session{display:flex;align-items:flex-start;gap:8px;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px}
+.term-session .gpu-desc{flex:1;min-width:0}
 .gpustat-link{cursor:pointer;transition:color .15s;color:var(--text2)}.gpustat-link:hover{color:var(--accent)}
 .image-row{display:flex;gap:8px;align-items:stretch}.image-row select{flex:1}.image-row .btn{white-space:nowrap}
 .terminal-bar{display:flex;align-items:center;justify-content:space-between;padding:6px 16px;background:var(--surface2);border-top:1px solid var(--border)}
@@ -113,7 +116,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(91,138,245,.04)}
 </style>
 </head>
 <body>
-<div class="header"><div><h1>Easy LXD<span class="version">v.1.3.0</span></h1><div class="subtitle">LXD インスタンス管理</div></div><div class="actions"><button class="btn btn-ghost btn-sm" id="serverUpdateBtn" onclick="confirmServerUpdate()">サーバアップデート</button><button class="btn btn-danger btn-sm" onclick="confirmServerReboot()">サーバ再起動</button><button class="btn btn-ghost btn-sm" onclick="refresh()">更新</button><button class="btn btn-primary" onclick="showCreate()">+ 新規インスタンス</button></div></div>
+<div class="header"><div><h1>Easy LXD<span class="version">v.1.4.0</span></h1><div class="subtitle">LXD インスタンス管理</div></div><div class="actions"><button class="btn btn-ghost btn-sm" onclick="showTerminals()">現在のターミナル</button><button class="btn btn-ghost btn-sm" id="serverUpdateBtn" onclick="confirmServerUpdate()">サーバアップデート</button><button class="btn btn-danger btn-sm" onclick="confirmServerReboot()">サーバ再起動</button><button class="btn btn-ghost btn-sm" onclick="refresh()">更新</button><button class="btn btn-primary" onclick="showCreate()">+ 新規インスタンス</button></div></div>
 <div class="container layout"><div class="main-col"><div class="table-wrap"><table><thead><tr><th>名前</th><th>状態</th><th>作成日</th><th>プロファイル</th><th>操作</th></tr></thead><tbody id="instances"></tbody></table></div></div><aside class="app-panel"><div class="app-panel-title">アプリ一覧</div><div id="appList"></div></aside></div>
 <div id="terminalPanel"><div id="termDragHandle"></div><div class="terminal-bar"><span class="term-title">ターミナル — <span id="termInstanceName"></span></span><div class="term-actions"><button class="btn btn-ghost btn-sm" onclick="resetTerminal()" title="セッションをリセット">⟳ リセット</button><button class="btn btn-ghost btn-sm" onclick="termFit()" title="画面に合わせる">FIT</button><button class="btn btn-ghost btn-sm" onclick="closeTerminal()">✕ 閉じる</button></div></div><div id="terminalContainer"></div></div>
 <div class="create-progress-panel" id="createProgressPanel"><div class="create-progress-header"><span class="cp-title"><span id="cpPanelTitle">インスタンス作成</span> — <span id="cpInstanceName"></span></span><div class="cp-status"><div class="spinner" id="cpSpinner"></div><span id="cpStatusText">作成中...</span><button class="cp-close" onclick="closeCreateProgress()" title="閉じる">&times;</button></div></div><div id="createProgressLog"></div></div>
@@ -123,6 +126,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:rgba(91,138,245,.04)}
 <div class="modal-overlay" id="confirmModal"><div class="modal" style="width:400px"><div class="modal-header"><h2 id="confirmTitle">確認</h2><button class="modal-close" onclick="closeModals()">&times;</button></div><div class="modal-body"><p class="confirm-msg" id="confirmMsg"></p></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModals()">キャンセル</button><button class="btn btn-danger" id="confirmBtn">確認</button></div></div></div>
 <div class="modal-overlay" id="gpuModal"><div class="modal" style="width:560px"><div class="modal-header"><h2>GPU パススルー</h2><button class="modal-close" onclick="closeModals()">&times;</button></div><div class="modal-body"><div class="form-group"><label>インスタンス</label><input type="text" id="gpuInstance" readonly></div><div class="form-group"><label>現在の GPU デバイス</label><div id="gpuCurrentList"></div></div><div class="form-group"><label>ホストの利用可能な GPU</label><div id="gpuAvailableList"></div></div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModals()">閉じる</button></div></div></div>
 <div class="modal-overlay" id="dtvCreateModal"><div class="modal"><div class="modal-header"><h2>KonomiTV コンテナ作成</h2><button class="modal-close" onclick="closeModals()">&times;</button></div><div class="modal-body"><div class="form-group"><label>コンテナ名</label><input type="text" id="dtvName" value="konomitv" pattern="[a-zA-Z0-9_-]+"></div><label class="checkbox-label"><input type="checkbox" id="dtvUseAuthkey" checked onchange="document.getElementById('dtvAuthkeyGroup').style.display=this.checked?'':'none'"> Tailscale authkey を使用</label><div class="form-group" id="dtvAuthkeyGroup"><label>Tailscale authkey</label><input type="password" id="dtvAuthkey" placeholder="tskey-auth-..." autocomplete="off"></div><label class="checkbox-label"><input type="checkbox" id="dtvSnapTs" checked> スナップショット「TailscaleOK」を作成</label><label class="checkbox-label"><input type="checkbox" id="dtvUsb" checked> USB チューナーをパススルー</label><label class="checkbox-label"><input type="checkbox" id="dtvSnapTuner" checked> スナップショット「TunerOK」を作成</label><div class="checkbox-note">ubuntu:26.04 でコンテナを作成し、/opt/lxd-data マウント・IDマッピング・Tailscale セットアップまで行います（tuner-lxd.sh のドライバ以降の部分）。</div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="closeModals()">キャンセル</button><button class="btn btn-primary" onclick="doDtvCreate()">作成</button></div></div></div>
+<div class="modal-overlay" id="terminalsModal"><div class="modal"><div class="modal-header"><h2>現在のターミナル</h2><button class="modal-close" onclick="closeModals()">&times;</button></div><div class="modal-body"><div id="terminalsList"></div><div class="checkbox-note">ターミナルセッションは最終切断後も24時間保持され、「接続」で出力を再生しつつ合流できます。</div></div><div class="modal-footer"><button class="btn btn-ghost" onclick="refreshTerminals()">↻ 更新</button><button class="btn btn-primary" onclick="closeModals()">閉じる</button></div></div></div>
 <script>
 let instances=[],imageList=[];
 async function api(path,opts={}){const res=await fetch(path,{headers:{'Content-Type':'application/json'},...opts,body:opts.body?JSON.stringify(opts.body):undefined});return res.json()}
@@ -430,6 +434,39 @@ function closeTerminal(){
   if(term){term.dispose();term=null}
   termAddonFit=null;
   termRunCmd=null;termTarget=null;
+}
+// --- 現在のターミナル (別 PC からの進行状況確認用) ---
+let activeTermSessions=[],termListTimer=null;
+function stripAnsi(t){return t.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g,'').replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g,'').replace(/[\x00-\x08\x0b-\x1f\x7f]/g,'')}
+async function showTerminals(){
+  document.getElementById('terminalsModal').classList.add('active');
+  await refreshTerminals();
+  if(termListTimer)clearInterval(termListTimer);
+  termListTimer=setInterval(()=>{if(!document.getElementById('terminalsModal').classList.contains('active')){clearInterval(termListTimer);termListTimer=null}else{refreshTerminals()}},5000);
+}
+async function refreshTerminals(){
+  const el=document.getElementById('terminalsList');
+  el.innerHTML='<div class="overview-empty">読み込み中...</div>';
+  try{
+    const r=await api('/api/terminals');
+    const ss=r.sessions||[];
+    activeTermSessions=ss;
+    if(!ss.length){el.innerHTML='<div class="overview-empty">アクティブなターミナルセッションはありません</div>';return}
+    el.innerHTML=ss.map((s,i)=>{
+      const st=s.clients>0?'<span class="badge badge-running">接続中</span>':'<span class="badge badge-other">切断中</span>';
+      const cmd=s.runCmd?`<div class="checkbox-note" style="margin-top:4px;word-break:break-all">${esc(s.runCmd)}</div>`:'';
+      const tail=s.tail?`<div class="term-tail">${esc(stripAnsi(s.tail))}</div>`:'';
+      return `<div class="term-session"><span class="gpu-desc"><span class="inst-name">${esc(s.instance||'(不明)')}</span> ${st} <span class="gpu-pci">開始: ${formatDate(s.startedAt)}</span>${cmd}${tail}</span><button class="btn btn-primary btn-sm" style="white-space:nowrap" onclick="joinTerminal(${i})">接続</button></div>`;
+    }).join('');
+  }catch(e){
+    el.innerHTML=`<div class="overview-empty">エラー: ${esc(e.message)}</div>`;
+  }
+}
+function joinTerminal(i){
+  const s=activeTermSessions[i];
+  if(!s)return;
+  closeModals();
+  openTerminal(s.instance,s.runCmd||null);
 }
 (function(){
   const handle=document.getElementById('termDragHandle');
