@@ -488,6 +488,16 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return false; }
   }
 
+  // コンテナ内の Tailscale に問合わせて Self の MagicDNS 名を取得する。
+  // tailnet ドメインは環境ごとに異なるためクライアント側へは生成済み URL のみ返す。
+  async function getTailscaleDnsName(name) {
+    try {
+      const { stdout } = await lxcExec(name, 'tailscale status --json', 15000);
+      const ts = JSON.parse(stdout);
+      return ((((ts || {}).Self || {}).DNSName) || '').replace(/\.$/, '');
+    } catch (e) { return ''; }
+  }
+
   if (pathname === '/api/apps/selfexplorer' && req.method === 'GET') {
     try {
       const apps = readApps();
@@ -505,7 +515,9 @@ const server = http.createServer(async (req, res) => {
       const result = await Promise.all(containers.map(async name => {
         const inst = await getInstance(name).catch(() => null);
         const running = !!inst && inst.status === 'Running';
-        return { container: name, running, installed: running ? await isSelfExplorerInstalled(name) : null };
+        const installed = running ? await isSelfExplorerInstalled(name) : null;
+        const dns = running && installed ? await getTailscaleDnsName(name) : '';
+        return { container: name, running, installed, url: dns ? `https://${dns}:3342/` : null };
       }));
       return json(res, 200, { containers: result });
     } catch (e) { return json(res, 500, { error: e.message }); }

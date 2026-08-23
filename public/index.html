@@ -15,7 +15,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 a{color:var(--accent);text-decoration:none}
 .header{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 24px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:100}
 .header h1{font-size:20px;font-weight:600}.header h1 .version{font-size:12px;font-weight:500;color:var(--text2);margin-left:6px;vertical-align:middle}.header .subtitle{color:var(--text2);font-size:14px}.header .actions{margin-left:auto;display:flex;gap:8px}
-.container{max-width:1200px;margin:0 auto;padding:24px}
+.container{padding:24px}
 .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border:none;border-radius:var(--radius);font-size:14px;font-weight:500;cursor:pointer;transition:all .15s}
 .btn:disabled{opacity:.5;cursor:not-allowed}.btn-primary{background:var(--accent);color:#fff}.btn-primary:hover:not(:disabled){background:var(--accent-hover)}
 .btn-danger{background:var(--red);color:#fff}.btn-danger:hover:not(:disabled){opacity:.85}
@@ -211,7 +211,6 @@ async function showGpuModal(instName){document.getElementById('gpuInstance').val
 function confirmAddGpu(instName,pci,desc){document.getElementById('confirmTitle').textContent='GPU パススルーの追加';document.getElementById('confirmMsg').innerHTML=`GPU <span class="confirm-name">${esc(desc)}</span> (${esc(pci)}) を <span class="confirm-name">${esc(instName)}</span> に追加しますか？<br>GPU パススルーは即座に有効になります（再起動不要）。`;document.getElementById('confirmBtn').className='btn btn-danger';document.getElementById('confirmBtn').onclick=async()=>{closeModals();const w=toastWorking(`GPU を ${instName} に追加中...`);try{const r=await api(`/api/instances/${instName}/gpu/add`,{method:'POST',body:{pci}});if(r.error)throw new Error(r.error);w.done(r.message||'GPU を追加しました');refresh();setTimeout(()=>showGpuModal(instName),600)}catch(e){w.fail(`エラー: ${e.message}`)}};closeModals();document.getElementById('confirmModal').classList.add('active')}
 function confirmRemoveGpu(instName,deviceName){document.getElementById('confirmTitle').textContent='GPU パススルーの取り外し';document.getElementById('confirmMsg').innerHTML=`GPU デバイス <span class="confirm-name">${esc(deviceName)}</span> を <span class="confirm-name">${esc(instName)}</span> から取り外しますか？`;document.getElementById('confirmBtn').className='btn btn-danger';document.getElementById('confirmBtn').onclick=async()=>{closeModals();const w=toastWorking(`GPU を ${instName} から取り外し中...`);try{const r=await api(`/api/instances/${instName}/gpu/remove`,{method:'POST',body:{deviceName}});if(r.error)throw new Error(r.error);w.done('GPU を取り外しました');refresh();setTimeout(()=>showGpuModal(instName),600)}catch(e){w.fail(`エラー: ${e.message}`)}};closeModals();document.getElementById('confirmModal').classList.add('active')}
 // --- アプリ一覧 (SelfExplorer) ---
-const SE_URL_BASE='https://CONTAINER.tailf682b.ts.net:3342/';
 let seRegistered=[];
 async function loadApps(){try{const r=await api('/api/apps/selfexplorer');seRegistered=r.containers||[]}catch(e){seRegistered=[]}renderApps()}
 function renderAppSelect(){const s=document.getElementById('seContainer'),p=s.value;const running=instances.filter(i=>i.status==='Running');s.innerHTML=running.length?running.map(i=>`<option value="${esc(i.name)}">${esc(i.name)}</option>`).join(''):'<option value="">稼働中のコンテナがありません</option>';if(p&&[...s.options].some(o=>o.value===p))s.value=p}
@@ -224,8 +223,9 @@ function renderApps(){
     let action;
     if(r.running){
       if(r.installed){
-        const url=SE_URL_BASE.replace('CONTAINER',r.container);
-        action=`<a class="btn btn-primary btn-sm" href="${esc(url)}" target="_blank" rel="noopener">起動</a>`;
+        action=r.url
+          ?`<a class="btn btn-primary btn-sm" href="${esc(r.url)}" target="_blank" rel="noopener">起動</a>`
+          :`<span class="app-empty">Tailnet URL を取得できません</span>`;
       }else{
         action=`<button class="btn btn-primary btn-sm" onclick="confirmInstallSelfExplorer('${esc(r.container)}')">インストール</button>`;
       }
