@@ -497,6 +497,16 @@ const server = http.createServer(async (req, res) => {
         'cd selfrss',
         'sudo bash install-selfrss1.sh'
       ]
+    },
+    selfmark: {
+      label: 'selfmark',
+      // インストール先は /opt/lxd-data（ブラウズ共有領域）配下なので注意。
+      installDir: '/opt/lxd-data/selfmark',
+      port: 3356,
+      installCmds: [
+        'curl -fsSL -o install-selfmark1.sh https://raw.githubusercontent.com/hirogura/selfmark/main/install-selfmark1.sh',
+        'sudo bash install-selfmark1.sh'
+      ]
     }
   };
 
