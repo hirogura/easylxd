@@ -468,11 +468,24 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
 
-  // --- アプリ一覧 (SelfExplorer) ---
+  // --- アプリ一覧 ---
   // 登録情報は apps.json に永続化する（ランタイムデータのためリポジトリ外管理）。
+  // アプリの追加は APP_REGISTRY にエントリを足すだけでよい。
   const APPS_FILE = path.join(__dirname, 'apps.json');
-  const SELFEXPLORER_INSTALL_SCRIPT = 'https://raw.githubusercontent.com/hirogura/selfexplorer/main/install-selfexplorer1.sh';
-  const SELFEXPLORER_INSTALL_CMD = `sudo bash -c "$(curl -fsSL ${SELFEXPLORER_INSTALL_SCRIPT})"`;
+  const APP_REGISTRY = {
+    selfexplorer: {
+      label: 'SelfExplorer',
+      installDir: '/opt/selfexplorer',
+      port: 3346,
+      installScriptUrl: 'https://raw.githubusercontent.com/hirogura/selfexplorer/main/install-selfexplorer1.sh'
+    },
+    selfnote: {
+      label: 'SelfNote',
+      installDir: '/opt/selfnote',
+      port: 3342,
+      installScriptUrl: 'https://raw.githubusercontent.com/hirogura/selfnote/main/install-selfnote.sh'
+    }
+  };
 
   function readApps() {
     try { return JSON.parse(fs.readFileSync(APPS_FILE, 'utf-8')); } catch (e) { return {}; }
@@ -480,10 +493,10 @@ const server = http.createServer(async (req, res) => {
   function writeApps(apps) {
     fs.writeFileSync(APPS_FILE, JSON.stringify(apps, null, 2) + '\n');
   }
-  // インストール済み判定はインストールディレクトリ /opt/selfexplorer の有無で行う。
-  async function isSelfExplorerInstalled(name) {
+  // インストール済み判定はアプリごとのインストールディレクトリの有無で行う。
+  async function isAppInstalled(name, cfg) {
     try {
-      await lxcExec(name, 'test -d /opt/selfexplorer', 15000);
+      await lxcExec(name, `test -d ${cfg.installDir}`, 15000);
       return true;
     } catch (e) { return false; }
   }
@@ -498,46 +511,53 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return ''; }
   }
 
-  if (pathname === '/api/apps/selfexplorer' && req.method === 'GET') {
+  if (pathname === '/api/apps' && req.method === 'GET') {
     try {
       const apps = readApps();
-      let containers = apps.selfexplorer || [];
-      // 削除済みインスタンスの登録は自動的に掃除する。
       let instanceNames = new Set();
       try { instanceNames = new Set((await getInstances()).map(i => i.name)); } catch (e) {}
-      const existing = containers.filter(c => instanceNames.has(c));
-      if (existing.length !== containers.length) {
-        apps.selfexplorer = existing;
-        writeApps(apps);
-        containers = existing;
+      // 削除済みインスタンスの登録は自動的に掃除する。
+      let dirty = false;
+      for (const appId of Object.keys(APP_REGISTRY)) {
+        const before = apps[appId] || [];
+        const after = before.filter(c => instanceNames.has(c));
+        if (after.length !== before.length) { apps[appId] = after; dirty = true; }
       }
+      if (dirty) writeApps(apps);
       // 稼働中のコンテナのみインストール状態を確認（停止中は exec できないため null）。
-      const result = await Promise.all(containers.map(async name => {
-        const inst = await getInstance(name).catch(() => null);
-        const running = !!inst && inst.status === 'Running';
-        const installed = running ? await isSelfExplorerInstalled(name) : null;
-        const dns = running && installed ? await getTailscaleDnsName(name) : '';
-        return { container: name, running, installed, url: dns ? `https://${dns}:3346/` : null };
+      const result = await Promise.all(Object.entries(APP_REGISTRY).map(async ([appId, cfg]) => {
+        const containers = await Promise.all((apps[appId] || []).map(async name => {
+          const inst = await getInstance(name).catch(() => null);
+          const running = !!inst && inst.status === 'Running';
+          const installed = running ? await isAppInstalled(name, cfg) : null;
+          const dns = running && installed ? await getTailscaleDnsName(name) : '';
+          return { container: name, running, installed, url: dns ? `https://${dns}:${cfg.port}/` : null };
+        }));
+        return { id: appId, label: cfg.label, containers };
       }));
-      return json(res, 200, { containers: result });
+      return json(res, 200, { apps: result });
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
 
-  if (pathname === '/api/apps/selfexplorer/register' && req.method === 'POST') {
+  const appActionMatch = pathname.match(/^\/api\/apps\/([^/]+)\/(register|install\/stream)$/);
+  if (appActionMatch && appActionMatch[2] === 'register' && req.method === 'POST') {
     try {
+      const [, appId] = appActionMatch;
+      const cfg = APP_REGISTRY[appId];
+      if (!cfg) return json(res, 404, { error: `Unknown app: ${appId}` });
       const body = await parseBody(req);
       if (!body.container) return json(res, 400, { error: 'container is required' });
       await getInstance(body.container); // 存在チェック
       const apps = readApps();
-      const list = new Set(apps.selfexplorer || []);
+      const list = new Set(apps[appId] || []);
       list.add(body.container);
-      apps.selfexplorer = [...list];
+      apps[appId] = [...list];
       writeApps(apps);
-      return json(res, 200, { ok: true, message: `${body.container} を SelfExplorer に登録しました` });
+      return json(res, 200, { ok: true, message: `${body.container} を ${cfg.label} に登録しました` });
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
 
-  if (pathname === '/api/apps/selfexplorer/install/stream' && req.method === 'POST') {
+  if (appActionMatch && appActionMatch[2] === 'install/stream' && req.method === 'POST') {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache',
@@ -547,14 +567,19 @@ const server = http.createServer(async (req, res) => {
     res.write(':\n\n');
     const send = (evt, data) => { try { res.write(`event: ${evt}\ndata: ${JSON.stringify(data)}\n\n`); } catch (e) {} };
     try {
+      const [, appId] = appActionMatch;
+      const cfg = APP_REGISTRY[appId];
+      if (!cfg) throw new Error(`Unknown app: ${appId}`);
       const body = await parseBody(req);
       if (!body.container) { send('error', { error: 'container is required' }); res.end(); return; }
       await getInstance(body.container);
-      send('log', { message: `=== ${body.container} へ SelfExplorer をインストール開始 ===` });
-      send('log', { message: SELFEXPLORER_INSTALL_CMD });
-      await lxcExec(body.container, SELFEXPLORER_INSTALL_CMD, 1800000, streamToLog(msg => send('log', { message: msg })));
-      const installed = await isSelfExplorerInstalled(body.container);
-      send('done', { message: installed ? 'SelfExplorer のインストールが完了しました' : 'スクリプトは終了しましたが /opt/selfexplorer が見つかりません' });
+      // 対象コンテナ内で各アプリの公式インストールスクリプトを実行する。
+      const installCmd = `sudo bash -c "$(curl -fsSL ${cfg.installScriptUrl})"`;
+      send('log', { message: `=== ${body.container} へ ${cfg.label} をインストール開始 ===` });
+      send('log', { message: installCmd });
+      await lxcExec(body.container, installCmd, 1800000, streamToLog(msg => send('log', { message: msg })));
+      const installed = await isAppInstalled(body.container, cfg);
+      send('done', { message: installed ? `${cfg.label} のインストールが完了しました` : `スクリプトは終了しましたが ${cfg.installDir} が見つかりません` });
     } catch (e) {
       send('error', { error: e.message });
     }
