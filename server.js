@@ -132,8 +132,12 @@ async function getSnapshots(container) {
   return (inst.snapshots || []).map(s => ({ name: s.name, created_at: s.created_at, size: s.size }));
 }
 
-async function lxcExec(name, script, timeout = 300000, onData = null) {
-  return run('lxc', ['exec', name, '--', 'bash', '-euo', 'pipefail', '-c', script], timeout, onData);
+async function lxcExec(name, script, timeout = 300000, onData = null, env = null) {
+  // env 指定時は lxc exec --env 経由でコンテナ内へ渡す（authkey 等のコマンドライン露出を避ける）。
+  const args = ['exec', name];
+  for (const [k, v] of Object.entries(env || {})) args.push('--env', `${k}=${v}`);
+  args.push('--', 'bash', '-euo', 'pipefail', '-c', script);
+  return run('lxc', args, timeout, onData);
 }
 
 // コマンドの標準出力/エラー出力を1行ずつ progress ログへ流すためのヘルパー。
@@ -206,7 +210,7 @@ async function refreshImages() {
 }
 
 async function createInstance(opts, progress) {
-  const { name, image, update: doUpdate, tailscale, docker, mount } = opts;
+  const { name, image, update: doUpdate, tailscale, docker, mount, tailscaleAuthkey, snapTailscaleOK } = opts;
   const isUbuntu = image.startsWith('ubuntu:');
   const log = progress || (() => {});
 
@@ -264,6 +268,21 @@ async function createInstance(opts, progress) {
     } catch (e) {
       log(`WARNING: Tailscale インストールに失敗しました（作成は継続します）: ${e.message}`);
     }
+    // authkey 指定時は tailscaled を起動して `tailscale up` まで行う（KonomiTV コンテナ作成と同じ挙動）。
+    if (tailscaleAuthkey) {
+      try {
+        log('Tailscale 認証中 (authkey)...');
+        await lxcExec(name, [
+          'systemctl enable --now tailscaled',
+          'for i in $(seq 1 30); do systemctl is-active --quiet tailscaled && break; sleep 1; done',
+          'tailscale up --authkey="$TS_AUTHKEY"',
+          'echo "Tailscale IP: $(tailscale ip -4 | head -n1)"'
+        ].join('\n'), 180000, streamToLog(log), { TS_AUTHKEY: tailscaleAuthkey });
+        log('Tailscale 認証完了');
+      } catch (e) {
+        log(`WARNING: Tailscale 認証に失敗しました（作成は継続します）: ${e.message}`);
+      }
+    }
   }
   if (isUbuntu && docker) {
     log('Docker インストール準備中 (security.nesting)...');
@@ -305,8 +324,23 @@ async function createInstance(opts, progress) {
       log(`WARNING: Docker インストールに失敗しました（インスタンス作成は継続します）: ${e.message}`);
     }
   }
-  const features = []; if (isUbuntu && doUpdate) features.push('update'); if (isUbuntu && tailscale) features.push('tailscale');
+  // スナップショットは停止状態で取るため、停止 → スナップショット → 起動まで行う。
+  if (snapTailscaleOK) {
+    log('スナップショット「TailscaleOK」を作成するためコンテナを停止中...');
+    try {
+      await lxc('stop', name);
+    } catch (e) {
+      if (!/already stopped/i.test(e.message)) throw e;
+    }
+    await lxc('snapshot', name, 'TailscaleOK');
+    log('スナップショット「TailscaleOK」を作成しました');
+    await lxc('start', name);
+    await waitRunning(name);
+    log('コンテナを起動しました');
+  }
+  const features = []; if (isUbuntu && doUpdate) features.push('update'); if (isUbuntu && tailscale) features.push(tailscaleAuthkey ? 'tailscale(auth)' : 'tailscale');
   if (isUbuntu && docker) features.push('docker'); if (isUbuntu && mount) features.push('mount');
+  if (snapTailscaleOK) features.push('snap:TailscaleOK');
   return `Instance ${name} created (${image}${features.length ? ' + ' + features.join(' + ') : ''})`;
 }
 
@@ -351,7 +385,12 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = await parseBody(req);
       if (!body.name || !body.image) return json(res, 400, { error: 'name and image are required' });
-      return json(res, 200, { ok: true, message: await createInstance({ name: body.name, image: body.image, update: !!body.update, tailscale: !!body.tailscale, docker: !!body.docker, mount: !!body.mount }) });
+      return json(res, 200, { ok: true, message: await createInstance({
+        name: body.name, image: body.image, update: !!body.update, tailscale: !!body.tailscale,
+        docker: !!body.docker, mount: !!body.mount,
+        tailscaleAuthkey: String(body.tailscaleAuthkey || '').replace(/[\r\n]/g, '').trim(),
+        snapTailscaleOK: !!body.snapTailscaleOK
+      }) });
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
 
@@ -369,7 +408,12 @@ const server = http.createServer(async (req, res) => {
       if (!body.name || !body.image) { send('error', { error: 'name and image are required' }); res.end(); return; }
       send('log', { message: `=== ${body.name} の作成を開始 ===` });
       const result = await createInstance(
-        { name: body.name, image: body.image, update: !!body.update, tailscale: !!body.tailscale, docker: !!body.docker, mount: !!body.mount },
+        {
+          name: body.name, image: body.image, update: !!body.update, tailscale: !!body.tailscale,
+          docker: !!body.docker, mount: !!body.mount,
+          tailscaleAuthkey: String(body.tailscaleAuthkey || '').replace(/[\r\n]/g, '').trim(),
+          snapTailscaleOK: !!body.snapTailscaleOK
+        },
         (msg) => send('log', { message: msg })
       );
       send('done', { message: result });
