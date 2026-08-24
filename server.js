@@ -754,6 +754,24 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
 
+  // 「対象コンテナ変更」: 稼働中コンテナを指定して dtv.json の対象コンテナを差し替える。
+  // TunerOK スナップショットから復元済みの既存コンテナに対して、
+  // アプリインストール以降のステップを実行できるようにするためのもの。
+  if (pathname === '/api/dtv/container/select' && req.method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const name = String(body.container || '').trim();
+      if (!/^[a-zA-Z0-9_-]+$/.test(name)) return json(res, 400, { error: 'コンテナ名が不正です' });
+      const inst = await getInstance(name).catch(() => null);
+      if (!inst) return json(res, 404, { error: `インスタンス ${name} が見つかりません` });
+      const st = readDtvState();
+      const prev = st.container || null;
+      st.container = name;
+      writeDtvState(st);
+      return json(res, 200, { ok: true, message: prev === name ? `対象コンテナはすでに ${name} です` : `対象コンテナを ${prev ? prev + ' から ' + name : name} に変更しました`, container: name });
+    } catch (e) { return json(res, 500, { error: e.message }); }
+  }
+
   // 「px4_drvインストール」ボタン: ~/dtv にリポジトリを取得し、tuner-lxd.sh の
   // ドライバ部分のみホスト上で実行する。対話プロンプトには全て y で回答する
   // （既存 .deb の再利用 / 新バージョンの取得、どちらの分岐でも最新側を選択）。
