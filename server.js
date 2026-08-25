@@ -625,7 +625,7 @@ const server = http.createServer(async (req, res) => {
     },
     taildropweb: {
       label: 'Taildrop Web',
-      installDir: '/opt/taildropweb',
+      installDir: '/opt/taildrop-web',
       port: 3349,
       installCmds: ['sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/hirogura/taildropweb/main/install-taildropweb.sh)"']
     },
