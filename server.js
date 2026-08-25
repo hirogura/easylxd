@@ -232,6 +232,13 @@ async function createInstance(opts, progress) {
     }
     await lxc('config', 'device', 'add', name, 'opt-lxd-data', 'disk', 'source=/opt/lxd-data', 'path=/opt/lxd-data');
     await lxc('config', 'set', name, 'raw.idmap', 'both 1000 1000');
+    // LXD の raw.idmap によりホスト側 root (UID 0) がコンテナ内 nobody にマッピングされ、
+    // /opt/lxd-data/konomitv-backup に書き込めなくなる。事前に権限を緩和する。
+    try {
+      const fs = require('fs');
+      fs.mkdirSync('/opt/lxd-data/konomitv-backup', { recursive: true });
+      fs.chmodSync('/opt/lxd-data/konomitv-backup', 0o777);
+    } catch (_) {}
     await lxc('start', name);
     await waitRunning(name);
     try {
@@ -904,6 +911,10 @@ const server = http.createServer(async (req, res) => {
         '} > "$ANSWERS"',
         'echo "--- コンテナ作成・マウント・Tailscale・スナップショット設定 ---"',
         'DTV_ANSWERS="$ANSWERS" DTV_STAGE="$STAGE" bash "$RUNNER" < /dev/null',
+        // LXD の raw.idmap "both 1000 1000" によりホスト側 root (UID 0) が
+        // コンテナ内 nobody にマッピングされ、バックアップ先に書き込めなくなる。
+        // tuner-lxd.sh が作成する /opt/lxd-data/konomitv-backup の権限を緩和する。
+        'chmod 777 /opt/lxd-data/konomitv-backup 2>/dev/null || true',
         'echo "コンテナ作成ステップが完了しました"'
       ].join('\n');
       await run('bash', ['-c', script], 3600000, streamToLog(msg => send('log', { message: msg }), ''), {
