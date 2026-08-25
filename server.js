@@ -623,6 +623,12 @@ const server = http.createServer(async (req, res) => {
       port: 3326,
       installCmds: ['curl -fsSL https://raw.githubusercontent.com/hirogura/rsyncgui/main/install-rsyncgui.sh | sudo bash']
     },
+    taildropweb: {
+      label: 'Taildrop Web',
+      installDir: '/opt/taildropweb',
+      port: 3349,
+      installCmds: ['sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/hirogura/taildropweb/main/install-taildropweb.sh)"']
+    },
     immich: {
       label: 'immich',
       installDir: '/opt/docker/immich',
