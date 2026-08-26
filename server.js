@@ -558,6 +558,62 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
 
+  // --- マウントデバイス (disk デバイス) の追加・編集 ---
+  const mountAddMatch = pathname.match(/^\/api\/instances\/([^/]+)\/mount\/add$/);
+  if (mountAddMatch && req.method === 'POST') {
+    const [, name] = mountAddMatch;
+    try {
+      const body = await parseBody(req);
+      // 末尾スラッシュは正規化しておく（デバイス名生成と重複判定の一貫性のため）。
+      const normalize = p => { const s = String(p || '').trim(); return s.length > 1 ? s.replace(/\/+$/, '') : s; };
+      const source = normalize(body.source);
+      const targetPath = normalize(body.path);
+      if (!source.startsWith('/') || !targetPath.startsWith('/')) return json(res, 400, { error: 'source/path は / から始まる絶対パスで指定してください' });
+      let wasRunning = false;
+      try { const { stdout } = await lxc('info', name); wasRunning = /Status:\s*RUNNING/.test(stdout); } catch (e) {}
+      const inst = await lxdGetInstance(name);
+      const devices = { ...(inst.devices || {}) };
+      let devName = String(body.deviceName || '').trim();
+      if (devName && !devices[devName]) devName = ''; // 編集指定だが既に削除済みの場合は新規扱い
+      if (!devName) {
+        // コンテナ側パスからデバイス名を自動生成（例: /opt/lxd-data → opt-lxd-data）
+        const base = targetPath.replace(/^\//, '').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '') || 'disk';
+        devName = base; let n = 2;
+        while (devices[devName]) devName = `${base}${n++}`;
+      }
+      devices[devName] = { type: 'disk', source, path: targetPath };
+      // マッピング文字を合わせる: 既存コンテナでも作成時フローと同じ raw.idmap
+      // (UID/GID 1000 → 1000) を必ず通す。ホスト側 1000 所有のファイルが
+      // コンテナ内から書き込めるようになる。
+      const config = inst.config || {};
+      const idmapLines = String(config['raw.idmap'] || '').split('\n').map(s => s.trim()).filter(Boolean);
+      const has1000Map = idmapLines.some(l => l.split(/\s+/).filter(p => p === '1000').length >= 2);
+      if (!has1000Map) {
+        idmapLines.push('both 1000 1000');
+        await lxc('config', 'set', name, 'raw.idmap', idmapLines.join('\n'));
+      }
+      await lxdUpdateInstance(name, { devices });
+      return json(res, 200, { ok: true, message: `${source} → ${targetPath} をデバイス ${devName} として設定しました`, deviceName: devName, running: wasRunning });
+    } catch (e) { return json(res, 500, { error: e.message }); }
+  }
+
+  const mountRemoveMatch = pathname.match(/^\/api\/instances\/([^/]+)\/mount\/remove$/);
+  if (mountRemoveMatch && req.method === 'POST') {
+    const [, name] = mountRemoveMatch;
+    try {
+      const body = await parseBody(req);
+      if (!body.deviceName) return json(res, 400, { error: 'deviceName is required' });
+      let wasRunning = false;
+      try { const { stdout } = await lxc('info', name); wasRunning = /Status:\s*RUNNING/.test(stdout); } catch (e) {}
+      const inst = await lxdGetInstance(name);
+      const devices = inst.devices || {};
+      if (!devices[body.deviceName] || devices[body.deviceName].type !== 'disk') return json(res, 404, { error: `Disk device ${body.deviceName} not found` });
+      const newDevices = { ...devices }; delete newDevices[body.deviceName];
+      await lxdUpdateInstance(name, { devices: newDevices });
+      return json(res, 200, { ok: true, message: `マウントデバイス ${body.deviceName} を取り外しました`, running: wasRunning });
+    } catch (e) { return json(res, 500, { error: e.message }); }
+  }
+
   // --- アプリ一覧 ---
   // 登録情報は apps.json に永続化する（ランタイムデータのためリポジトリ外管理）。
   // アプリの追加は APP_REGISTRY にエントリを足すだけでよい。
