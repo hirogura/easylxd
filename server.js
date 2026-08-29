@@ -1018,7 +1018,58 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  const SECURITY_KEYS = { nesting: 'security.nesting', privileged: 'security.privileged' };
+  // 「バックアップをインポート」: DTV管理ダッシュボードがエクスポートした
+  // konomitv-backup-日付.tar.gz を /opt/lxd-data/konomitv-backup へ展開する。
+  // 既存バックアップは上書き（置き換え）する。
+  if (pathname === '/api/dtv/backup/import' && req.method === 'POST') {
+    const send = sseStart(res);
+    // 大容量でもメモリに載せないよう /tmp の一時ファイルへストリーミング受信する。
+    const tmpPath = path.join('/tmp', `konomitv-backup-import-${Date.now()}-${crypto.randomBytes(6).toString('hex')}.tar.gz`);
+    const out = fs.createWriteStream(tmpPath, { mode: 0o600 });
+    try {
+      await new Promise((resolve, reject) => {
+        req.on('data', c => out.write(c));
+        req.on('end', () => out.end(resolve));
+        req.on('error', reject);
+        out.on('error', reject);
+      });
+      send('log', { message: '=== KonomiTV バックアップをインポート ===' });
+      send('log', { message: 'アップロードを受信しました。展開を開始します...' });
+      const script = [
+        'set -euo pipefail',
+        `TMP=${JSON.stringify(tmpPath)}`,
+        'STAGE=$(mktemp -d /tmp/konomitv-stage.XXXXXXXX)',
+        'trap \'rm -rf "$STAGE" "$TMP"\' EXIT',
+        // gzip の tar であることと読み取り可能性を先に検証する。
+        'tar -tzf "$TMP" >/dev/null',
+        // パストラバーサル（絶対パス / 親ディレクトリ参照）をはじく。
+        'if tar -tzf "$TMP" | grep -qE "(^/|(^|/)\\.\\.(/|$))"; then echo "ERROR: 不正なパスが含まれているため中止します"; exit 1; fi',
+        'tar -xzf "$TMP" -C "$STAGE"',
+        'if [ -z "$(ls -A "$STAGE")" ]; then echo "ERROR: バックアップデータが含まれていません"; exit 1; fi',
+        // アーカイブが konomitv-backup/ ディレクトリを直接含む形式にも対応する。
+        'if [ -d "$STAGE/konomitv-backup" ] && [ "$(ls -A "$STAGE" | wc -l)" = 1 ]; then SRC="$STAGE/konomitv-backup"; else SRC="$STAGE"; fi',
+        'echo "既存の /opt/lxd-data/konomitv-backup を上書きします..."',
+        'rm -rf /opt/lxd-data/konomitv-backup',
+        'mkdir -p /opt/lxd-data/konomitv-backup',
+        'cp -a "$SRC"/. /opt/lxd-data/konomitv-backup/',
+        // コンテナ内から書き込めるよう作成時と同じ権限に揃える。
+        // LXD の非特権コンテナではコンテナ内 root がホスト上 1000000 と表示されるため、
+        // バックアップをコンテナが作成した場合と同じ所有権 (1000000:1000000) に合わせる。
+        'chmod 777 /opt/lxd-data/konomitv-backup',
+        'chown -R 1000000:1000000 /opt/lxd-data/konomitv-backup',
+        'echo "インポート完了: /opt/lxd-data/konomitv-backup"'
+      ].join('\n');
+      await run('bash', ['-c', script], 1800000, streamToLog(msg => send('log', { message: msg })));
+      send('done', { message: 'バックアップのインポートが完了しました' });
+    } catch (e) {
+      send('error', { error: e.message });
+    } finally {
+      try { out.destroy(); } catch (_) {}
+      try { fs.unlinkSync(tmpPath); } catch (_) {}
+      res.end();
+    }
+    return;
+  }
   const securityMatch = pathname.match(/^\/api\/instances\/([^/]+)\/security$/);
   if (securityMatch && req.method === 'POST') {
     const [, name] = securityMatch;

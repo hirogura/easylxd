@@ -317,7 +317,7 @@ function renderKonomiBlock(){
   const manageBtn=(installed&&c)
     ?`<a class="btn btn-primary btn-sm" href="http://${esc(c)}/" target="_blank" rel="noopener">DTV管理</a>`
     :`<button class="btn btn-primary btn-sm" onclick="confirmDtvManage()">DTV管理</button>`;
-  return `<div class="app-block"><div class="app-name">KonomiTV</div><div class="dtv-btns"><button class="btn btn-ghost btn-sm" onclick="confirmDtvDriver()">px4_drvインストール</button><button class="btn btn-ghost btn-sm" onclick="showDtvCreate()">コンテナ作成</button><button class="btn btn-ghost btn-sm" onclick="confirmDtvAppInstall()">アプリインストール</button>${manageBtn}</div><div class="app-empty">${status}</div><div class="checkbox-note">px4_drvインストール → コンテナ作成 → アプリインストール → DTV管理 の順で実行します</div><div style="margin-top:10px"><button class="btn btn-ghost btn-sm" onclick="showDtvSelect()">対象コンテナ変更</button></div></div>`;
+  return `<div class="app-block"><div class="app-name">KonomiTV</div><div class="dtv-btns"><button class="btn btn-ghost btn-sm" onclick="importDtvBackup()">バックアップをインポート</button><button class="btn btn-ghost btn-sm" onclick="confirmDtvDriver()">px4_drvインストール</button><button class="btn btn-ghost btn-sm" onclick="showDtvCreate()">コンテナ作成</button><button class="btn btn-ghost btn-sm" onclick="confirmDtvAppInstall()">アプリインストール</button>${manageBtn}</div><div class="app-empty">${status}</div><div class="checkbox-note">px4_drvインストール → コンテナ作成 → アプリインストール → DTV管理 の順で実行します</div><div style="margin-top:10px"><button class="btn btn-ghost btn-sm" onclick="showDtvSelect()">対象コンテナ変更</button></div></div>`;
 }
 function askConfirm(title,msg,fn,okClass='btn-primary'){
   document.getElementById('confirmTitle').textContent=title;
@@ -333,6 +333,45 @@ async function confirmDtvDriver(){
   askConfirm('px4_drv インストール','ホストにチューナードライバ (<span class="confirm-name">px4_drv</span>) をインストールします。<br>~/dtv に mirakc-edcb-konomitv リポジトリを取得し、tuner-lxd.sh のドライバ部分のみ実行します。',async()=>{
     await runDtvStream('/api/dtv/driver/stream',{},'KonomiTV セットアップ','px4_drv ドライバ @ ホスト');
   });
+}
+// 「バックアップをインポート」: konomitv-backup-日付.tar.gz を選択して
+// /opt/lxd-data/konomitv-backup へ展開する（既存データは上書き）。
+function importDtvBackup(){
+  const input=document.createElement('input');
+  input.type='file';
+  input.accept='.tar.gz,application/gzip';
+  input.style.display='none';
+  document.body.appendChild(input);
+  input.onchange=()=>{
+    const f=input.files&&input.files[0];
+    input.remove();
+    if(!f)return;
+    if(!/^konomitv-backup-.+\.tar\.gz$/.test(f.name)){
+      toast('konomitv-backup-日付.tar.gz という名前のファイルを選択してください','error');
+      return;
+    }
+    askConfirm('KonomiTV バックアップ インポート',`<span class="confirm-name">${esc(f.name)}</span> を <span class="confirm-name">/opt/lxd-data/konomitv-backup</span> に展開します。<br>既存のバックアップは上書きされます。`,()=>doImportDtvBackup(f));
+  };
+  input.click();
+}
+async function doImportDtvBackup(file){
+  const panel=document.getElementById('createProgressPanel');panel.classList.add('active');
+  document.getElementById('cpPanelTitle').textContent='KonomiTV バックアップ インポート';
+  document.getElementById('cpInstanceName').textContent=file.name;
+  document.getElementById('createProgressLog').innerHTML='';
+  document.getElementById('cpStatusText').textContent='アップロード中...';
+  document.getElementById('cpSpinner').style.display='';
+  try{
+    const res=await fetch('/api/dtv/backup/import',{method:'POST',headers:{'Content-Type':'application/gzip'},body:file});
+    if(!res.ok){const err=await res.json().catch(()=>({}));throw new Error(err.error||'アップロードに失敗しました')}
+    const reader=res.body.getReader();const decoder=new TextDecoder();let buffer='',errMsg=null,evt='';
+    while(true){const{done,value}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const lines=buffer.split('\n');buffer=lines.pop();for(const line of lines){if(line.startsWith('event:')){evt=line.slice(6).trim()}else if(line.startsWith('data:')){try{const d=JSON.parse(line.slice(5));if(d.message)appendCreateLog(d.message);if(evt==='error'&&d.error)errMsg=d.error}catch(e){}}}}
+    if(errMsg)throw new Error(errMsg);
+    finishCreateProgress(true,'インポート完了');
+  }catch(e){
+    appendCreateLog('エラー: '+e.message);
+    finishCreateProgress(false,'エラー: '+e.message);
+  }
 }
 function showDtvCreate(){
   if(!dtvStatus.container)void confirmDtvStatus();
