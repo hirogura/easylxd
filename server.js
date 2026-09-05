@@ -994,6 +994,13 @@ const server = http.createServer(async (req, res) => {
         DTV_USB: usbPass,
         DTV_SNAPTUNER: snapTuner
       });
+      try {
+        send('log', { message: 'タイムゾーンを JST (Asia/Tokyo) に設定中...' });
+        await lxcExec(name, 'sudo timedatectl set-timezone Asia/Tokyo', 60000, streamToLog(msg => send('log', { message: msg }), ''));
+        send('log', { message: 'タイムゾーン設定完了' });
+      } catch (e) {
+        send('log', { message: `WARNING: タイムゾーン設定に失敗しました（作成は継続します）: ${e.message}` });
+      }
       const st = readDtvState(); st.container = name; writeDtvState(st);
       send('done', { message: `コンテナ '${name}' の作成完了 — 続いて「アプリインストール」を実行してください` });
     } catch (e) {
