@@ -266,6 +266,13 @@ async function createInstance(opts, progress) {
     } catch (e) {
       log(`WARNING: アップデートに失敗しました（作成は継続します）: ${e.message}`);
     }
+    try {
+      log('タイムゾーンを JST (Asia/Tokyo) に設定中...');
+      await lxcExec(name, 'sudo timedatectl set-timezone Asia/Tokyo', 60000, streamToLog(log));
+      log('タイムゾーン設定完了');
+    } catch (e) {
+      log(`WARNING: タイムゾーン設定に失敗しました（作成は継続します）: ${e.message}`);
+    }
   }
   if (isUbuntu && tailscale) {
     try {
