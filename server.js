@@ -1084,6 +1084,7 @@ const server = http.createServer(async (req, res) => {
     }
     return;
   }
+  const SECURITY_KEYS = { nesting: 'security.nesting', privileged: 'security.privileged' };
   const securityMatch = pathname.match(/^\/api\/instances\/([^/]+)\/security$/);
   if (securityMatch && req.method === 'POST') {
     const [, name] = securityMatch;
