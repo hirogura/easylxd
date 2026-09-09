@@ -14,8 +14,9 @@ LXD インスタンスをブラウザから管理するための Web UI です�
 
 ## 必要要件
 
-- Ubuntu（または systemd が動く Linux）
-- LXD（未導入の場合はインストールスクリプトが確認のうえ自動導入します）
+- Ubuntu / Debian 系、または CachyOS / Arch Linux 系（systemd が動くこと）
+- LXD（未導入の場合はインストールスクリプトが OS に合わせて自動導入します。
+  Ubuntu 系は snap、CachyOS / Arch 系は pacman）
 - Tailscale がインストール済みで、ログイン済みであること
 - root 権限
 - インターネット接続
@@ -23,8 +24,9 @@ LXD インスタンスをブラウザから管理するための Web UI です�
 自動でインストールされるもの:
 
 - Node.js / npm
-- build-essential, python3（node-pty のビルド用）
-- pciutils（GPU 一覧の取得用）
+- Ubuntu 系: build-essential, python3（node-pty のビルド用）、pciutils（GPU 一覧の取得用）
+- CachyOS / Arch 系: base-devel, python3、pciutils（GPU 一覧の取得用）、
+  usbutils（チューナー検出用）、jq、lxd、dkms、btrfs-progs、カーネルヘッダ
 
 ---
 
@@ -45,9 +47,16 @@ chmod +x /tmp/lxd-setup.sh
 
 実行内容（何度実行しても安全・既に設定済みの項目はスキップ）:
 
-- LXD のインストール（snap）
+- LXD のインストール（Ubuntu 系は snap、CachyOS / Arch 系は pacman。
+  後者は `lxd.socket` / `lxd.service` の有効化も行う）
+- CachyOS / Arch 系のみ: `/etc/subuid`・`/etc/subgid` の root マッピング追加、
+  firewalld が有効な場合の lxdbr0 許可
 - `lxd init --minimal` による初期化
+- Btrfs 環境のみ: `/opt/lxd-pool`・`/opt/lxd-data` を独立サブボリュームとして事前作成
+  （snapper のシステムスナップショットから除外するため。非Btrfs 環境や
+  空でない既存ディレクトリでは何もしない）
 - ストレージプールを `/opt/lxd-pool` に変更
+  （Btrfs 上では `btrfs` ドライバー、それ以外は `dir` ドライバー）
 - HTTPS API の有効化（`:8443`）
 - 実行ユーザーを `lxd` グループに追加
 
@@ -170,6 +179,16 @@ rm -rf /opt/easy-lxd
 インスタンス作成時に「/opt/lxd-data マウント」を有効にすると、
 コンテナ内の `/opt/lxd-data` にホストの `/opt/lxd-data` がマウントされ、
 UID/GID 1000 で共有されます。
+
+### KonomiTV (DTV) について
+
+コンテナ操作（作成・Tailscale・Docker・マウント等）はコンテナ内が Ubuntu のため
+ホスト OS によらずそのまま動作します。ホスト側のチューナードライバ（px4_drv）導入は、
+「px4_drvインストール」ボタンがホスト OS を自動判定し、
+CachyOS / Arch 系では `tuner-lxd-cachyos.sh`（ソース + DKMS 方式）、
+Ubuntu / Debian 系では従来どおり `tuner-lxd.sh`（.deb + apt 方式）の
+ドライバ部分を実行します。
+CachyOS での詳細は [KONOMITV-CACHYOS.md](KONOMITV-CACHYOS.md) を参照してください。
 
 ## ライセンス
 

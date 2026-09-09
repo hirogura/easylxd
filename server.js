@@ -806,15 +806,17 @@ const server = http.createServer(async (req, res) => {
 
   // --- KonomiTV (DTV) セットアップ ---
   // ほかのアプリと異なりコンテナ選択を行わない専用フロー。
-  // ホスト側スクリプト tuner-lxd.sh は対話式（y/n プロンプト・コンテナ名/authkey 入力）のため、
+  // ホスト側スクリプト (Ubuntu・Debian用 tuner-lxd.sh / CachyOS・Arch用
+  // tuner-lxd-cachyos.sh) は対話式（y/n プロンプト・コンテナ名/authkey 入力）のため、
   // セクション見出しコメントを境界に awk で分割し、
   //   stage1 = ドライバ部分（セクション1まで）  …「px4_drvインストール」ボタン
   //   stage2 = 残り（セクション2以降・プロローグ再結合） …「コンテナ作成」ボタン
   // として実行する。対話への回答は標準入力ファイル経由で与える
   // （authkey もファイル経由のためログには流れない）。
+  // 両スクリプトのセクション見出しは同一のため、分割用 awk は共通で使える。
   const DTV_REPO_URL = 'https://github.com/hirogura/mirakc-edcb-konomitv.git';
   const DTV_MANAGE_URL = 'https://raw.githubusercontent.com/hirogura/mirakc-edcb-konomitv/main/install-dtv-manage.sh';
-  // 分割位置は tuner-lxd.sh のセクション見出しコメントで判定（index で前方一致比較）。
+  // 分割位置は tuner-lxd.sh / tuner-lxd-cachyos.sh のセクション見出しコメントで判定（index で前方一致比較）。
   const DTV_AWK_STAGE1 = 'index($0,"# 2. コンテナ名の入力")==1{exit}\n{print}';
   const DTV_AWK_STAGE2 = [
     'index($0,"# 1. チューナードライバのインストール")==1{skip=1}',
@@ -892,16 +894,19 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
 
-  // 「px4_drvインストール」ボタン: ~/dtv にリポジトリを取得し、tuner-lxd.sh の
-  // ドライバ部分のみホスト上で実行する。対話プロンプトには全て y で回答する
-  // （既存 .deb の再利用 / 新バージョンの取得、どちらの分岐でも最新側を選択）。
+  // 「px4_drvインストール」ボタン: ~/dtv にリポジトリを取得し、ホスト OS に合った
+  // スクリプト (CachyOS/Arch: tuner-lxd-cachyos.sh / Ubuntu/Debian: tuner-lxd.sh)
+  // のドライバ部分のみホスト上で実行する。対話プロンプトには全て y で回答する
+  // （既存ドライバの再利用 / 新バージョンの取得、どちらの分岐でも最新側を選択。
+  //  CachyOS 版でカーネルヘッダが無い場合の導入確認にも y で回答する）。
   if (pathname === '/api/dtv/driver/stream' && req.method === 'POST') {
     const send = sseStart(res);
     try {
       send('log', { message: '=== KonomiTV セットアップ (1/4): px4_drv ドライバのインストール ===' });
       const script = [
         'set -euo pipefail',
-        'export PATH="/snap/bin:$PATH"',
+        '# snap 版 lxc が /snap/bin にある環境 (Ubuntu) 向けに PATH を通す (存在しない環境では無害)',
+        '[ -d /snap/bin ] && export PATH="/snap/bin:$PATH"',
         // systemd 経由の起動では HOME が未設定のため /root にフォールバックする。
         'DTV_DIR="${HOME:-/root}/dtv"',
         'if [ -d "$DTV_DIR/.git" ]; then',
@@ -912,18 +917,30 @@ const server = http.createServer(async (req, res) => {
         `  git clone ${DTV_REPO_URL} "$DTV_DIR"`,
         'fi',
         'cd "$DTV_DIR"',
+        // ホスト OS に合ったドライバ導入スクリプトを選択する。
+        'if command -v pacman >/dev/null 2>&1; then',
+        '  DTV_SCRIPT="tuner-lxd-cachyos.sh"',
+        'elif command -v apt-get >/dev/null 2>&1; then',
+        '  DTV_SCRIPT="tuner-lxd.sh"',
+        'else',
+        '  echo "ERROR: pacman / apt-get のどちらも無いため px4_drv を導入できません。"',
+        '  exit 1',
+        'fi',
+        'echo "使用スクリプト: $DTV_SCRIPT"',
+        'test -f "$DTV_SCRIPT" || { echo "ERROR: $DTV_SCRIPT がリポジトリに見つかりません"; exit 1; }',
         'STAGE=$(mktemp /tmp/easylxd-dtv-stage1.XXXXXXXX.sh)',
         'RUNNER=$(mktemp /tmp/easylxd-dtv-runner.XXXXXXXX.sh)',
         'ANSWERS=$(mktemp /tmp/easylxd-dtv-answer.XXXXXXXX.txt)',
         'chmod 600 "$ANSWERS"',
         "trap 'rm -f \"$STAGE\" \"$RUNNER\" \"$ANSWERS\"' EXIT",
-        `awk '${DTV_AWK_STAGE1}' tuner-lxd.sh > "$STAGE"`,
-        'grep -q px4_drv "$STAGE" || { echo "ERROR: tuner-lxd.sh からドライバ部分を抽出できませんでした"; exit 1; }',
-        'if grep -q "コンテナ名を入力" "$STAGE"; then echo "ERROR: tuner-lxd.sh の分割に失敗しました"; exit 1; fi',
+        `awk '${DTV_AWK_STAGE1}' "$DTV_SCRIPT" > "$STAGE"`,
+        'grep -q px4_drv "$STAGE" || { echo "ERROR: $DTV_SCRIPT からドライバ部分を抽出できませんでした"; exit 1; }',
+        'if grep -q "コンテナ名を入力" "$STAGE"; then echo "ERROR: $DTV_SCRIPT の分割に失敗しました"; exit 1; fi',
         `echo ${DTV_RUNNER_B64} | base64 -d > "$RUNNER"`,
-        // 対話プロンプト（ドライバインストール可否・既存 .deb 再利用/新バージョン取得）には y で回答。
-        "printf 'y\\ny\\n' > \"$ANSWERS\"",
-        'echo "--- tuner-lxd.sh のドライバ部分を実行 ---"',
+        // 対話プロンプト（ドライバインストール可否・既存ドライバ再利用/新バージョン取得・
+        // CachyOS 版のカーネルヘッダ導入確認）には y で回答。
+        "printf 'y\\ny\\ny\\n' > \"$ANSWERS\"",
+        'echo "--- $DTV_SCRIPT のドライバ部分を実行 ---"',
         'DTV_ANSWERS="$ANSWERS" DTV_STAGE="$STAGE" bash "$RUNNER" < /dev/null',
         'echo "px4_drv ドライバのインストールが完了しました"'
       ].join('\n');
@@ -955,22 +972,40 @@ const server = http.createServer(async (req, res) => {
       send('log', { message: `=== KonomiTV セットアップ (2/4): コンテナ '${name}' の作成 ===` });
       const script = [
         'set -euo pipefail',
-        'export PATH="/snap/bin:$PATH"',
+        '# snap 版 lxc が /snap/bin にある環境 (Ubuntu) 向けに PATH を通す (存在しない環境では無害)',
+        '[ -d /snap/bin ] && export PATH="/snap/bin:$PATH"',
         // systemd 経由の起動では HOME が未設定のため /root にフォールバックする。
         'DTV_DIR="${HOME:-/root}/dtv"',
-        'if [ ! -f "$DTV_DIR/tuner-lxd.sh" ]; then',
-        '  echo "ERROR: $DTV_DIR/tuner-lxd.sh が見つかりません。先に「px4_drvインストール」を実行してください。"',
+        // ホスト OS に合ったスクリプトを使う (driver ステップと同じ選択)。
+        // コンテナ作成以降は LXD 操作のため OS 非依存だが、スクリプト側の
+        // 前提チェック (セクション0) が OS 別になっているため合わせる。
+        'if command -v pacman >/dev/null 2>&1; then',
+        '  DTV_SCRIPT="tuner-lxd-cachyos.sh"',
+        'elif command -v apt-get >/dev/null 2>&1; then',
+        '  DTV_SCRIPT="tuner-lxd.sh"',
+        'else',
+        '  echo "ERROR: pacman / apt-get のどちらも無いためコンテナ作成スクリプトを実行できません。"',
         '  exit 1',
         'fi',
+        // 片方しか無いリポジトリ状態に備えてフォールバックする。
+        '[ -f "$DTV_DIR/$DTV_SCRIPT" ] || DTV_SCRIPT="tuner-lxd.sh"',
+        '[ -f "$DTV_DIR/$DTV_SCRIPT" ] || DTV_SCRIPT="tuner-lxd-cachyos.sh"',
+        'if [ ! -f "$DTV_DIR/$DTV_SCRIPT" ]; then',
+        '  echo "ERROR: $DTV_DIR に tuner-lxd.sh / tuner-lxd-cachyos.sh が見つかりません。先に「px4_drvインストール」を実行してください。"',
+        '  exit 1',
+        'fi',
+        'echo "使用スクリプト: $DTV_SCRIPT"',
         'cd "$DTV_DIR"',
         'STAGE=$(mktemp /tmp/easylxd-dtv-stage2.XXXXXXXX.sh)',
         'RUNNER=$(mktemp /tmp/easylxd-dtv-runner.XXXXXXXX.sh)',
         'ANSWERS=$(mktemp /tmp/easylxd-dtv-answer.XXXXXXXX.txt)',
         'chmod 600 "$ANSWERS"',
         "trap 'rm -f \"$STAGE\" \"$RUNNER\" \"$ANSWERS\"' EXIT",
-        `awk '${DTV_AWK_STAGE2}' tuner-lxd.sh > "$STAGE"`,
-        'grep -q "コンテナ名を入力" "$STAGE" || { echo "ERROR: tuner-lxd.sh からコンテナ作成部分を抽出できませんでした"; exit 1; }',
-        'if grep -q px4_drv "$STAGE"; then echo "ERROR: tuner-lxd.sh の分割に失敗しました"; exit 1; fi',
+        `awk '${DTV_AWK_STAGE2}' "$DTV_SCRIPT" > "$STAGE"`,
+        'grep -q "コンテナ名を入力" "$STAGE" || { echo "ERROR: $DTV_SCRIPT からコンテナ作成部分を抽出できませんでした"; exit 1; }',
+        // セクション1 (ドライバ) の見出しが残っていたら分割失敗。
+        // 文字列 px4_drv 自体では判定しない (cachyos 版の先頭コメントに由来が書かれているため)。
+        'if grep -q "# 1. チューナードライバのインストール" "$STAGE"; then echo "ERROR: $DTV_SCRIPT の分割に失敗しました"; exit 1; fi',
         `echo ${DTV_RUNNER_B64} | base64 -d > "$RUNNER"`,
         '{',
         '  printf \'%s\\n\' "$DTV_NAME"',
@@ -1115,11 +1150,12 @@ const server = http.createServer(async (req, res) => {
     res.write(':\n\n');
     const send = (evt, data) => { try { res.write(`event: ${evt}\ndata: ${JSON.stringify(data)}\n\n`); } catch (e) {} };
     // 一時ファイル名は mktemp でランダム生成し、多重実行やシンボリックリンク攻撃を防ぐ。
-    // /snap/bin を先頭に付与するのは systemd 経由起動時に snap の lxc/snap コマンドが
-    // PATH 外になるケースがあるため（installer の export PATH と同じ意図）。
+    // snap 版 lxc が /snap/bin にある環境 (Ubuntu) 向けに PATH を通す
+    // (存在しない環境では無害。systemd 経由起動時に snap コマンドが
+    // PATH 外になるケースがあるための措置)。
     const script = [
       'set -euo pipefail',
-      'export PATH="/snap/bin:$PATH"',
+      '[ -d /snap/bin ] && export PATH="/snap/bin:$PATH"',
       'TMP=$(mktemp /tmp/lxd-setup.XXXXXXXX.sh)',
       'APP=$(mktemp /tmp/easylxd-app.XXXXXXXX.tar.gz)',
       'trap \'rm -f "$TMP" "$APP"\' EXIT',
@@ -1128,12 +1164,19 @@ const server = http.createServer(async (req, res) => {
       // --skip-pool: サーバアップデート時はプール関連の処理をスキップする。
       // default プールが /opt/lxd-pool 以外の環境でスクリプトを再実行すると
       // 既存プールの削除・再作成が走ってエラーになるため（初回インストール時のみ変更する）。
+      // lxd-setup.sh 自体が OS 判別 (snap / pacman) を行うため、ここでの分岐は不要。
       '"$TMP" --skip-pool',
       `echo "EasyLXD 本体を最新版に更新中... (${APP_TARBALL_URL})"`,
       `curl -fsSL -o "$APP" ${APP_TARBALL_URL}`,
+      // tarball が正規のアプリ内容か検証してから展開する
+      // (リポジトリ未push時などの不完全な tarball による破壊を防ぐ)。
+      'tar -tzf "$APP" | grep -q "server.js" || { echo "ERROR: tarball に server.js が含まれていません。リポジトリの push 状態を確認してください"; exit 1; }',
       // インストーラと同じく tarball を展開して上書きする。
       // 実行中の server.js はメモリ上で動き続けるため差し替えは安全。
       `tar -xzf "$APP" --strip-components=1 -C '${__dirname}'`,
+      // npm 12+ では install scripts がブロックされるため承認を維持する。
+      // (古い npm では install-scripts コマンドが無いため失敗しても無視する)
+      `cd '${__dirname}' && npm install-scripts approve node-pty >/dev/null 2>&1 || true`,
       // 依存が変わっていない場合は即終了する。node-pty の再ビルドも不要。
       `cd '${__dirname}' && npm install --omit=dev --no-audit --no-fund`
     ].join('\n');
