@@ -51,11 +51,19 @@ async function lxdUpdateInstance(name, updateFields) {
   return run('lxc', ['query', '--wait', '-X', 'PUT', '--data', JSON.stringify(payload), `/1.0/instances/${name}`]);
 }
 
-function parseBody(req) {
+function parseBody(req, maxBytes = 1000000) {
   return new Promise((resolve, reject) => {
     let data = '';
-    req.on('data', chunk => data += chunk);
-    req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch (e) { reject(e); } });
+    let tooLarge = false;
+    req.on('data', chunk => {
+      if (tooLarge) return;
+      data += chunk;
+      if (data.length > maxBytes) {
+        tooLarge = true;
+        reject(new Error('Request body too large'));
+      }
+    });
+    req.on('end', () => { if (!tooLarge) { try { resolve(data ? JSON.parse(data) : {}); } catch (e) { reject(e); } } });
   });
 }
 
@@ -186,7 +194,13 @@ let cachedImages = null;
 
 function getImages() {
   if (cachedImages) return cachedImages;
-  return UBUNTU_VERSIONS.map(ver => ({ alias: `ubuntu:${ver}`, description: `Ubuntu ${ver} LTS` }));
+  return UBUNTU_VERSIONS.map(ver => {
+    // 偶数年 .04 のみ LTS（26.04 / 24.04 / 22.04 / 20.04 / 18.04）。
+    // 25.04 / 25.10 のような中間リリースに LTS と付けない。
+    const major = parseInt(ver.split('.')[0], 10);
+    const isLts = ver.endsWith('.04') && major % 2 === 0;
+    return { alias: `ubuntu:${ver}`, description: `Ubuntu ${ver}${isLts ? ' LTS' : ''}` };
+  });
 }
 
 async function refreshImages() {
@@ -383,7 +397,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   const instMatch = pathname.match(/^\/api\/instances\/([^/]+)\/(start|stop|restart|delete)$/);
-  if (instMatch) {
+  if (instMatch && req.method === 'POST') {
     const [, name, action] = instMatch;
     try {
       if (action === 'delete') {
@@ -442,10 +456,13 @@ const server = http.createServer(async (req, res) => {
   if (cloneMatch && req.method === 'POST') {
     const [, srcName] = cloneMatch;
     try {
-      const body = await parseBody(req); if (!body.newName) return json(res, 400, { error: 'newName is required' });
-      await lxc('copy', srcName, body.newName, '--stateless');
-      await lxc('config', 'set', body.newName, 'raw.idmap', 'both 1000 1000'); await lxc('start', body.newName);
-      return json(res, 200, { ok: true, message: `Cloned ${srcName} to ${body.newName}` });
+      const body = await parseBody(req);
+      const newName = String(body.newName || '').trim();
+      if (!newName) return json(res, 400, { error: 'newName is required' });
+      if (!/^[a-zA-Z0-9_-]+$/.test(newName)) return json(res, 400, { error: 'newName は英数字と - _ のみ使用できます' });
+      await lxc('copy', srcName, newName, '--stateless');
+      await lxc('config', 'set', newName, 'raw.idmap', 'both 1000 1000'); await lxc('start', newName);
+      return json(res, 200, { ok: true, message: `Cloned ${srcName} to ${newName}` });
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
 
@@ -456,7 +473,10 @@ const server = http.createServer(async (req, res) => {
   if (snapListMatch && req.method === 'POST') {
     try {
       const body = await parseBody(req);
-      const snap = `snap-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}${body.comment ? '-' + body.comment.replace(/\s+/g, '-') : ''}`;
+      // コメント由来のスナップショット名は英数字・-_ のみに正規化する。
+      // '/' や '..' が混入すると `lxc delete <inst>/<snap>` のパス解釈が壊れるため。
+      const safeComment = String(body.comment || '').trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32);
+      const snap = `snap-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}${safeComment ? '-' + safeComment : ''}`;
       await lxc('snapshot', snapListMatch[1], snap);
       return json(res, 200, { ok: true, message: `Snapshot ${snap} created`, name: snap });
     } catch (e) { return json(res, 500, { error: e.message }); }
@@ -576,8 +596,16 @@ const server = http.createServer(async (req, res) => {
       const source = normalize(body.source);
       const targetPath = normalize(body.path);
       if (!source.startsWith('/') || !targetPath.startsWith('/')) return json(res, 400, { error: 'source/path は / から始まる絶対パスで指定してください' });
+      // コンテナのルート (/) へのマウントはコンテナを破壊するため拒否する。
+      if (targetPath === '/') return json(res, 400, { error: 'コンテナ側パスに / (ルート) は指定できません' });
       let wasRunning = false;
       try { const { stdout } = await lxc('info', name); wasRunning = /Status:\s*RUNNING/.test(stdout); } catch (e) {}
+      // raw.idmap の変更は停止状態でしか適用できないため、稼働中は一旦停止する。
+      // 終了後は自動で起動し直すので再起動確認は不要になる。
+      let stoppedByUs = false;
+      if (wasRunning) {
+        try { await lxc('stop', name); stoppedByUs = true; } catch (e) { if (!/already stopped/i.test(e.message)) throw e; }
+      }
       const inst = await lxdGetInstance(name);
       const devices = { ...(inst.devices || {}) };
       let devName = String(body.deviceName || '').trim();
@@ -600,7 +628,11 @@ const server = http.createServer(async (req, res) => {
         await lxc('config', 'set', name, 'raw.idmap', idmapLines.join('\n'));
       }
       await lxdUpdateInstance(name, { devices });
-      return json(res, 200, { ok: true, message: `${source} → ${targetPath} をデバイス ${devName} として設定しました`, deviceName: devName, running: wasRunning });
+      if (stoppedByUs) {
+        await lxc('start', name);
+        await waitRunning(name);
+      }
+      return json(res, 200, { ok: true, message: `${source} → ${targetPath} をデバイス ${devName} として設定しました`, deviceName: devName, running: stoppedByUs ? false : wasRunning });
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
 
@@ -1204,13 +1236,21 @@ const server = http.createServer(async (req, res) => {
 
   const termResetMatch = pathname.match(/^\/api\/terminal\/reset\/(.+)$/);
   if (termResetMatch && req.method === 'POST') {
-    const instName = termResetMatch[1];
-    const session = activeTerminals.get(instName);
-    if (session) {
+    let instName = termResetMatch[1];
+    try { instName = decodeURIComponent(instName); } catch (e) {}
+    // 通常セッション (キー = インスタンス名) に加え、スクリプト実行セッション
+    // (キー = "<name>::run:<hash>") も対象にする。run 付きで開いたターミナルは
+    // 従来の完全一致では見つからずリセットできなかった。
+    const keys = [...activeTerminals.keys()].filter(k => k === instName || k.startsWith(`${instName}::run:`));
+    for (const k of keys) {
+      const session = activeTerminals.get(k);
+      if (!session) continue;
       for (const c of session.clients) {
         try { c.send(JSON.stringify({ type: 'exit' })); } catch (e) {}
       }
-      killSession(session, instName);
+      killSession(session, k);
+    }
+    if (keys.length) {
       return json(res, 200, { ok: true, message: `Terminal session for ${instName} has been reset` });
     }
     return json(res, 200, { ok: true, message: `No active session for ${instName}` });
