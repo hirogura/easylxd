@@ -223,11 +223,40 @@ async function refreshImages() {
   return images;
 }
 
+// CachyOS/Arch ではカーネル更新後に再起動せず `lxc launch` すると
+// veth 作成に失敗する（実行中カーネルの /lib/modules が pacman で
+// 削除済みのため "Unknown device type" になる）。
+// LXD のエラーだけでは原因が分かりづらいため、事前に検出して
+// 再起動を促すメッセージで失敗させる。
+async function checkHostVeth(log) {
+  const { stdout: kver } = await run('uname', ['-r']);
+  if (!fs.existsSync(`/lib/modules/${kver}`)) {
+    throw new Error(`ホストのカーネル (${kver}) 用モジュールが見つかりません。カーネル更新後に再起動していない可能性があります。ホストを再起動 (sudo reboot) してから再試行してください。`);
+  }
+  // veth が実際に作れるか試す。別要因（権限等）の失敗では警告に留め、
+  // 先に進んで LXD 側のエラーをそのまま出す。
+  // インターフェース名は15文字制限 (IFNAMSIZ) のため短くする。
+  const a = `ev${process.pid}a`;
+  const b = `ev${process.pid}b`;
+  try {
+    await run('ip', ['link', 'add', a, 'type', 'veth', 'peer', 'name', b], 15000);
+    await run('ip', ['link', 'del', a], 15000).catch(() => {});
+  } catch (e) {
+    if (/Unknown device type/i.test(e.message)) {
+      throw new Error(`ホストで veth を作成できません (Unknown device type)。カーネル更新後の再起動が必要な可能性があります。ホストを再起動 (sudo reboot) してから再試行してください。`);
+    }
+    (log || (() => {}))(`WARNING: veth 事前確認をスキップします: ${e.message}`);
+  }
+}
+
 async function createInstance(opts, progress) {
   const { name, image, update: doUpdate, tailscale, docker, mount, tailscaleAuthkey, snapTailscaleOK } = opts;
   const isUbuntu = image.startsWith('ubuntu:');
   const log = progress || (() => {});
 
+  log('ホストのネットワーク機能(veth)を確認中...');
+  await checkHostVeth(log);
+  log('ホストのネットワーク機能(veth)を確認しました');
   log(`lxc launch ${image} ${name}`);
   await run('lxc', ['launch', image, name], 300000, streamToLog(log));
   log('コンテナを起動中...');
@@ -1041,6 +1070,13 @@ const server = http.createServer(async (req, res) => {
         'fi',
         'echo "使用スクリプト: $DTV_SCRIPT"',
         'cd "$DTV_DIR"',
+        // カーネル更新後の未再起動では veth が作れず lxc launch が eth0 開始エラーになる。
+        // 外部スクリプトの cryptic な失敗の前に分かりやすいメッセージで止める。
+        'KVER="$(uname -r)"',
+        'if [ ! -d "/lib/modules/$KVER" ]; then',
+        '  echo "ERROR: 実行中カーネル ($KVER) 用のモジュールが見つかりません。カーネル更新後に再起動していない可能性があります。ホストを再起動 (sudo reboot) してから再試行してください。"',
+        '  exit 1',
+        'fi',
         'STAGE=$(mktemp /tmp/easylxd-dtv-stage2.XXXXXXXX.sh)',
         'RUNNER=$(mktemp /tmp/easylxd-dtv-runner.XXXXXXXX.sh)',
         'ANSWERS=$(mktemp /tmp/easylxd-dtv-answer.XXXXXXXX.txt)',

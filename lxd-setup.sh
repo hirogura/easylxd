@@ -266,6 +266,33 @@ if command -v firewall-cmd &>/dev/null && firewall-cmd --state 2>/dev/null | gre
 fi
 
 # ------------------------------------------------------------
+# 6b. 実行中カーネルとモジュールの不整合を検出 (CachyOS/Arch で多発)
+#    pacman でカーネル更新後に再起動していないと /lib/modules/$(uname -r)
+#    が存在せず、`ip link add ... type veth` が "Unknown device type" で
+#    失敗し、コンテナ作成が eth0 開始エラーになる。
+#    検出のみ (非破壊)。再起動は促すだけで自動では行わない。
+# ------------------------------------------------------------
+KVER="$(uname -r)"
+if [ ! -d "/lib/modules/$KVER" ]; then
+  echo "[WARN] 実行中カーネル ($KVER) 用のモジュールが見つかりません。"
+  echo "       カーネル更新後に再起動していない可能性があります。"
+  echo "       再起動するまでコンテナ作成 (veth) が失敗します: sudo reboot"
+else
+  echo "[SKIP] カーネルモジュールは実行中カーネルと一致しています ($KVER)"
+fi
+# veth モジュールのロード確認 (ベストエフォート。組み込みの場合は何もしない)。
+if command -v modprobe &>/dev/null; then
+  modprobe veth 2>/dev/null || true
+fi
+if ip link add evprobe0 type veth peer name evprobe1 &>/dev/null; then
+  ip link del evprobe0 &>/dev/null || true
+  echo "[SKIP] veth インターフェースを作成できます"
+else
+  echo "[WARN] veth インターフェースを作成できません (ip link add type veth が失敗)。"
+  echo "       カーネル更新後の再起動が必要な可能性があります: sudo reboot"
+fi
+
+# ------------------------------------------------------------
 # 7. ストレージプールを /opt/lxd-pool に変更
 #    Btrfs上ならサブボリューム化 + btrfs ドライバー、非Btrfsなら
 #    通常ディレクトリ + dir ドライバー (Ubuntu の ext4/zfs 等では
