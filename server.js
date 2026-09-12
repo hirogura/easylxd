@@ -693,6 +693,19 @@ const server = http.createServer(async (req, res) => {
         'sudo bash install-selfmark1.sh'
       ]
     },
+    selfphoto: {
+      label: 'selfphoto',
+      installDir: '/opt/selfphoto',
+      port: 3360,
+      installCmds: [
+        // 再インストールに備え clone 先を初期化してから指定コマンドを実行する。
+        'cd /opt',
+        'rm -rf selfphoto',
+        'git clone https://github.com/hirogura/selfphoto.git',
+        'cd selfphoto',
+        'sudo ./install.sh'
+      ]
+    },
     spw: {
       label: 'SPW',
       installDir: '/opt/lxd-data/spw',
