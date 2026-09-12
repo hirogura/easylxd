@@ -173,6 +173,78 @@ function waitRunning(name, timeout = 30) {
   });
 }
 
+// waitRunning の停止版。スナップショットは停止状態で取る必要があるため、
+// `lxc stop` 直後に即 `lxc snapshot` すると競合して DB に記録されないまま
+// btrfs 側だけ subvolume が残る孤立スナップショットになることがある
+// (vaio-cachy-lxd で実例あり)。STOPPED を確認してから次に進む。
+function waitStopped(name, timeout = 30) {
+  return new Promise(resolve => {
+    let elapsed = 0;
+    const iv = setInterval(async () => {
+      try { const { stdout } = await lxc('info', name); if (/Status:\s*STOPPED/.test(stdout)) { clearInterval(iv); resolve(true); return; } } catch (e) {}
+      elapsed++; if (elapsed >= timeout) { clearInterval(iv); resolve(false); }
+    }, 1000);
+  });
+}
+
+// btrfs プールで LXD の DB に記録されない孤立スナップショット
+// (/opt/lxd-pool/containers-snapshots/<name>/*) が残ると
+// `lxc delete` が "Cannot remove a volume that has snapshots" で失敗する。
+// name は英数字・-_ のみを許可し、パス走査を防ぐ。
+function cleanupOrphanBtrfsSnapshots(name, log) {
+  if (!/^[a-zA-Z0-9_-]+$/.test(name)) return [];
+  const dir = `/opt/lxd-pool/containers-snapshots/${name}`;
+  let entries = [];
+  try { entries = fs.readdirSync(dir); } catch (e) { return []; }
+  const removed = [];
+  for (const entry of entries) {
+    if (!/^[a-zA-Z0-9_.-]+$/.test(entry)) continue;
+    const full = `${dir}/${entry}`;
+    try {
+      require('child_process').execFileSync('btrfs', ['subvolume', 'delete', full], { timeout: 60000 });
+      removed.push(entry);
+      (log || (() => {}))(`孤立スナップショット ${entry} を削除しました`);
+    } catch (e) {
+      (log || (() => {}))(`WARNING: 孤立スナップショット ${entry} の削除に失敗: ${e.message}`);
+    }
+  }
+  return removed;
+}
+
+async function deleteInstance(name) {
+  if (!/^[a-zA-Z0-9_-]+$/.test(name)) throw new Error('コンテナ名が不正です');
+  try { await lxc('stop', name, '--force'); } catch (e) { if (!/already stopped|not running/i.test(e.message)) throw e; }
+  await waitStopped(name, 15).catch(() => {});
+  // DB 上のスナップショットを先に全削除する。1つでも残ると
+  // "Cannot remove a volume that has snapshots" で削除が失敗するため。
+  try {
+    const snaps = await lxdApi('GET', `/1.0/instances/${name}/snapshots`);
+    const list = snaps.metadata || snaps || [];
+    for (const s of list) {
+      const snapName = typeof s === 'string' ? s.split('/').pop() : (s.name || '').split('/').pop();
+      if (!snapName) continue;
+      await lxc('delete', `${name}/${snapName}`);
+    }
+  } catch (e) {
+    if (!/not found|InstanceSnapshot not found|Instance not found/i.test(e.message)) throw e;
+  }
+  try {
+    await lxc('delete', name);
+  } catch (e) {
+    // DB には無いが btrfs 側に残った孤立スナップショットが原因の場合は
+    // 除去してからリトライする。
+    if (/has snapshots/i.test(e.message)) {
+      const removed = cleanupOrphanBtrfsSnapshots(name);
+      if (removed.length > 0) {
+        await lxc('delete', name);
+        return;
+      }
+      throw new Error(`${e.message}（スナップショットが残っているため削除できません。UI のスナップショット欄を確認するか、ホストで btrfs subvolume list /opt/lxd-pool を確認してください）`);
+    }
+    throw e;
+  }
+}
+
 // lxc info の Status: RUNNING はコンテナプロセスが起動したことしか示さず、
 // systemd-resolved 等のネットワーク/DNS初期化が終わっている保証はない。
 // 起動直後に apt-get update / curl | sh を実行すると
@@ -382,6 +454,9 @@ async function createInstance(opts, progress) {
     }
   }
   // スナップショットは停止状態で取るため、停止 → スナップショット → 起動まで行う。
+  // stop 直後に snapshot すると競合して DB 未記録の孤立 btrfs subvolume が残り、
+  // 後の `lxc delete` が "has snapshots" で失敗するため STOPPED を待ってから取る。
+  // スナップショット失敗で作成全体を失敗扱いにしない（本体は既に作成済みのため警告に留める）。
   if (snapTailscaleOK) {
     log('スナップショット「TailscaleOK」を作成するためコンテナを停止中...');
     try {
@@ -389,11 +464,21 @@ async function createInstance(opts, progress) {
     } catch (e) {
       if (!/already stopped/i.test(e.message)) throw e;
     }
-    await lxc('snapshot', name, 'TailscaleOK');
-    log('スナップショット「TailscaleOK」を作成しました');
-    await lxc('start', name);
-    await waitRunning(name);
-    log('コンテナを起動しました');
+    await waitStopped(name, 30);
+    try {
+      await lxc('snapshot', name, 'TailscaleOK', '--reuse');
+      log('スナップショット「TailscaleOK」を作成しました');
+    } catch (e) {
+      log(`WARNING: スナップショット「TailscaleOK」の作成に失敗しました（作成は継続します）: ${e.message}`);
+    }
+    try {
+      await lxc('start', name);
+      await waitRunning(name);
+      log('コンテナを起動しました');
+    } catch (e) {
+      log(`WARNING: スナップショット後の起動に失敗しました: ${e.message}`);
+      throw e;
+    }
   }
   const features = []; if (isUbuntu && doUpdate) features.push('update'); if (isUbuntu && tailscale) features.push(tailscaleAuthkey ? 'tailscale(auth)' : 'tailscale');
   if (isUbuntu && docker) features.push('docker'); if (isUbuntu && mount) features.push('mount');
@@ -430,8 +515,7 @@ const server = http.createServer(async (req, res) => {
     const [, name, action] = instMatch;
     try {
       if (action === 'delete') {
-        try { await lxc('stop', name, '--force'); } catch (e) { if (!/already stopped/i.test(e.message)) throw e; }
-        await lxc('delete', name);
+        await deleteInstance(name);
       }
       else if (action === 'stop') await lxc('stop', name);
       else await lxc(action, name);
