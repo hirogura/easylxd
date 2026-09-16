@@ -94,6 +94,56 @@ wanted_storage_driver() {
 }
 
 # ------------------------------------------------------------
+# プール残骸サブボリュームの除去
+#   LXD の DB に default プールが登録されていないのに $LXD_POOL_DIR に
+#   LXD 作成の子サブボリューム (containers/ images/ 等) が残っていると、
+#   `lxc storage create` が "not empty" で失敗し、再インストールしても
+#   同じ箇所で失敗し続ける (CachyOS の sidebar 再インストールで実例あり)。
+#   呼び出し前にインスタンス・カスタムボリュームが無いことは確認済みの
+#   ため、LXD 標準の子名だけに限定して除去し、プール再作成を回復させる。
+#   LXD 標準以外のファイルが1つでもあれば保護のため何もせず 1 を返す。
+# ------------------------------------------------------------
+cleanup_orphan_pool_subvolumes() {
+  local dir="$1"
+  local allowed_re='^(containers|containers-snapshots|custom|custom-snapshots|images|virtual-machines|virtual-machines-snapshots|deleted|buckets)$'
+  local entry base
+  local has_foreign=false
+  local has_target=false
+  shopt -s nullglob dotglob
+  for entry in "$dir"/*; do
+    base="$(basename "$entry")"
+    if [[ "$base" =~ $allowed_re ]]; then
+      has_target=true
+    else
+      echo "[WARN] $entry は LXD 標準のプール内容ではないため残骸除去を中止します"
+      has_foreign=true
+    fi
+  done
+  shopt -u nullglob dotglob
+  if [ "$has_foreign" = true ]; then
+    echo "       手動で確認してください: ls -la $dir / btrfs subvolume list $dir"
+    echo "       中身を退避・削除してから再実行してください。"
+    return 1
+  fi
+  if [ "$has_target" = false ]; then
+    return 0
+  fi
+  # 子 subvolume を先に消すため、パス長の降順 (深い階層優先) で削除する。
+  # (ファイル名の改行は LXD 標準名に現れない前提。スペースは f2- で保持。)
+  find "$dir" -mindepth 1 2>/dev/null \
+    | awk '{ print length, $0 }' | sort -rn | cut -d' ' -f2- \
+    | while IFS= read -r entry; do
+        if btrfs subvolume show "$entry" &>/dev/null; then
+          echo "[RUN]  残骸サブボリュームを削除します: $entry"
+          btrfs subvolume delete "$entry" || echo "[WARN] $entry の削除に失敗しました"
+        fi
+      done
+  # subvolume でない残り (通常ファイル・空ディレクトリ) を除去する。
+  find "$dir" -mindepth 1 -exec rm -rf -- {} + 2>/dev/null || true
+  return 0
+}
+
+# ------------------------------------------------------------
 # オプション解析
 #   --skip-pool : ストレージプール関連の処理をスキップする。
 #                 サーバアップデート時に UI から実行される場合に指定され、
@@ -298,6 +348,9 @@ fi
 #    通常ディレクトリ + dir ドライバー (Ubuntu の ext4/zfs 等では
 #    従来どおり dir になる)。
 #    （default プールが無い状態でも必ず作成する）
+#    中断された初回インストールの残骸で再作成が "not empty" になる
+#    場合は LXD 標準の子名に限定して除去し再試行する (sidebar 再
+#    インストールの無限失敗を防ぐ)。
 #    --skip-pool 指定時（サーバアップデート時）はスキップ。
 # ------------------------------------------------------------
 # /opt/lxd-data もプール処理の成否に関わらずサブボリューム化だけは保証する
@@ -341,7 +394,24 @@ else
       $SUDO lxc profile device remove default root 2>/dev/null || true
       $SUDO lxc storage delete default
     fi
-    $SUDO lxc storage create default "$WANT_DRIVER" source="$LXD_POOL_DIR"
+    # DB 未登録の残骸サブボリュームが残っていると btrfs プールの再作成が
+    # "not empty" で失敗する (中断された初回インストールの残骸など)。
+    # その場合は LXD 標準の子名に限定して除去し、1回だけ再試行する。
+    # それ以外のエラーはそのまま表示して中断する。
+    POOL_ERR_FILE="$(mktemp /tmp/easylxd-pool-err.XXXXXXXX)"
+    if $SUDO lxc storage create default "$WANT_DRIVER" source="$LXD_POOL_DIR" 2>"$POOL_ERR_FILE"; then
+      rm -f "$POOL_ERR_FILE"
+    elif grep -qi "not empty" "$POOL_ERR_FILE"; then
+      cat "$POOL_ERR_FILE" >&2
+      rm -f "$POOL_ERR_FILE"
+      echo "[RUN]  孤立したプール残骸を除去して再試行します..."
+      cleanup_orphan_pool_subvolumes "$LXD_POOL_DIR"
+      $SUDO lxc storage create default "$WANT_DRIVER" source="$LXD_POOL_DIR"
+    else
+      cat "$POOL_ERR_FILE" >&2
+      rm -f "$POOL_ERR_FILE"
+      exit 1
+    fi
   fi
 
   # ------------------------------------------------------------

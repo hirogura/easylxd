@@ -296,12 +296,20 @@ else
 fi
 
 # --- Tailscale Serve (HTTPS / Tailnet限定で公開、LANには公開しない) ---
+# Serve 登録の失敗 (未ログイン等) でインストール全体を失敗扱いにしない。
+# サービス本体は既に起動しているため、Serve だけ後から手動登録できる。
 echo ""
 echo "Tailscale Serve を設定中..."
 TAILSCALE_PORT=$PORT
 # 冪等性確保のため一旦offにしてから再登録（tailscale serve reset は使わない）
 tailscale serve --https="${TAILSCALE_PORT}" off >/dev/null 2>&1 || true
-tailscale serve --bg --https="${TAILSCALE_PORT}" "http://127.0.0.1:${PORT}"
+if tailscale serve --bg --https="${TAILSCALE_PORT}" "http://127.0.0.1:${PORT}"; then
+  echo "Tailscale Serve を登録しました"
+else
+  echo "WARNING: Tailscale Serve の登録に失敗しました (未ログインの可能性があります)。"
+  echo "         'tailscale up' でログイン後、以下で手動登録してください:"
+  echo "           tailscale serve --bg --https=${TAILSCALE_PORT} http://127.0.0.1:${PORT}"
+fi
 
 TAILSCALE_DOMAIN=""
 if command -v jq &>/dev/null; then
@@ -325,4 +333,17 @@ else
   echo "  URL:   tailscale serve status で確認してください"
 fi
 echo "  Dir:   ${INSTALL_DIR}"
+
+# --- 起動確認 (応答が無ければ原因切り分けの手がかりを表示) ---
+echo ""
+echo "起動を確認中..."
+if systemctl is-active --quiet easy-lxd 2>/dev/null \
+  && curl -fsSL -m 10 "http://127.0.0.1:${PORT}/api/instances" >/dev/null 2>&1; then
+  echo "起動確認 OK: http://127.0.0.1:${PORT} が応答しました"
+else
+  echo "WARNING: easy-lxd サービスが応答しません。以下で原因を確認してください:"
+  echo "  systemctl status easy-lxd"
+  echo "  journalctl -u easy-lxd -n 50"
+  echo "  lxc info / lxc list (LXD デーモンの状態)"
+fi
 echo ""
