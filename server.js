@@ -772,11 +772,11 @@ const server = http.createServer(async (req, res) => {
   // installCmds は対象コンテナ内で順に実行されるコマンド列（lxc exec の作業ディレクトリは /root）。
   const APPS_FILE = path.join(__dirname, 'apps.json');
   const APP_REGISTRY = {
-    selfexplorer: {
-      label: 'SelfExplorer',
-      installDir: '/opt/selfexplorer',
-      port: 3346,
-      installCmds: ['sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/hirogura/selfexplorer/main/install-selfexplorer1.sh)"']
+    selfex: {
+      label: 'selfEx',
+      installDir: '/opt/selfex',
+      port: 3362,
+      installCmds: ['sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/hirogura/selfex/main/install-selfex1.sh)"']
     },
     selfnote: {
       label: 'SelfNote',
