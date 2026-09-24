@@ -427,15 +427,10 @@ else
 fi
 
 # ------------------------------------------------------------
-# 9. HTTPS API を有効化
+# 9. HTTPS API (lxd-ui 用 :8443) は明示的に有効化しない
+#    LXD 側で自動的に有効になる場合はそのままとするが、
+#    本スクリプトからは `lxc config set core.https_address` を実行しない。
 # ------------------------------------------------------------
-CURRENT_HTTPS=$($SUDO lxc config get core.https_address 2>/dev/null || echo "")
-if [ "$CURRENT_HTTPS" = ":8443" ]; then
-  echo "[SKIP] HTTPS API は既に :8443 で有効です"
-else
-  echo "[RUN]  HTTPS API を :8443 で有効化します..."
-  $SUDO lxc config set core.https_address :8443
-fi
 
 # ------------------------------------------------------------
 # 10. ユーザーを lxd グループに追加
@@ -455,9 +450,6 @@ fi
 echo ""
 echo "=========================================="
 echo " LXD セットアップ完了"
-echo "=========================================="
-echo " アクセス先:"
-echo "   https://$(hostname):8443"
 echo "=========================================="
 if [ "${NEED_RELOGIN:-false}" = "true" ]; then
   echo ""
