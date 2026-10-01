@@ -8,6 +8,10 @@ const pty = require('node-pty');
 
 const PORT = 3329;
 
+// 作成中の対話プロンプト（Tailscale 認証失敗時の選択）を待つための待機マップ。
+// promptId -> { resolve, timer }
+const createPromptWaiters = new Map();
+
 function run(cmd, args = [], timeout = 120000, onData = null, env = undefined) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { timeout, stdio: ['ignore', 'pipe', 'pipe'], env: env ? { ...process.env, ...env } : undefined });
@@ -321,7 +325,28 @@ async function checkHostVeth(log) {
   }
 }
 
-async function createInstance(opts, progress) {
+// コンテナ内で tailscaled を起動し、authkey で `tailscale up` 認証を行う。
+async function tailscaleAuthUp(name, authkey, log) {
+  await lxcExec(name, [
+    'systemctl enable --now tailscaled',
+    'for i in $(seq 1 30); do systemctl is-active --quiet tailscaled && break; sleep 1; done',
+    'tailscale up --authkey="$TS_AUTHKEY"',
+    'echo "Tailscale IP: $(tailscale ip -4 | head -n1)"'
+  ].join('\n'), 180000, streamToLog(log), { TS_AUTHKEY: authkey });
+}
+
+// コンテナ内で通常の `tailscale up`（対話ログイン）を行う。ログに表示される URL を
+// ブラウザで開いて認証が完了するまで待つため、タイムアウトを長め (15分) に取る。
+async function tailscaleLoginUp(name, log) {
+  await lxcExec(name, [
+    'systemctl enable --now tailscaled',
+    'for i in $(seq 1 30); do systemctl is-active --quiet tailscaled && break; sleep 1; done',
+    'tailscale up',
+    'echo "Tailscale IP: $(tailscale ip -4 | head -n1)"'
+  ].join('\n'), 900000, streamToLog(log));
+}
+
+async function createInstance(opts, progress, prompt) {
   const { name, image, update: doUpdate, tailscale, docker, mount, tailscaleAuthkey, snapTailscaleOK } = opts;
   const isUbuntu = image.startsWith('ubuntu:');
   const log = progress || (() => {});
@@ -398,18 +423,51 @@ async function createInstance(opts, progress) {
       log(`WARNING: Tailscale インストールに失敗しました（作成は継続します）: ${e.message}`);
     }
     // authkey 指定時は tailscaled を起動して `tailscale up` まで行う（KonomiTV コンテナ作成と同じ挙動）。
+    // 失敗時は別 authkey / 通常の tailscale up / スキップをユーザーが選択できる。
     if (tailscaleAuthkey) {
-      try {
-        log('Tailscale 認証中 (authkey)...');
-        await lxcExec(name, [
-          'systemctl enable --now tailscaled',
-          'for i in $(seq 1 30); do systemctl is-active --quiet tailscaled && break; sleep 1; done',
-          'tailscale up --authkey="$TS_AUTHKEY"',
-          'echo "Tailscale IP: $(tailscale ip -4 | head -n1)"'
-        ].join('\n'), 180000, streamToLog(log), { TS_AUTHKEY: tailscaleAuthkey });
-        log('Tailscale 認証完了');
-      } catch (e) {
-        log(`WARNING: Tailscale 認証に失敗しました（作成は継続します）: ${e.message}`);
+      let authkey = tailscaleAuthkey;
+      while (true) {
+        try {
+          log('Tailscale 認証中 (authkey)...');
+          await tailscaleAuthUp(name, authkey, log);
+          log('Tailscale 認証完了');
+          break;
+        } catch (e) {
+          log(`WARNING: Tailscale 認証に失敗しました: ${e.message}`);
+          // 対話できない呼び出し元（非ストリームAPI）では従来どおりスキップして継続。
+          if (typeof prompt !== 'function') {
+            log('対応を選択できないため、認証をスキップして作成を継続します');
+            break;
+          }
+          const answer = await prompt({
+            kind: 'tailscale-auth-failed',
+            message: `Tailscale の認証に失敗しました: ${e.message}`,
+            options: [
+              { value: 'newauthkey', label: '別の authkey を使用' },
+              { value: 'loginup', label: '通常の tailscale up で認証' },
+              { value: 'skip', label: 'スキップ' }
+            ]
+          });
+          const choice = answer && answer.choice;
+          if (choice === 'newauthkey') {
+            if (!answer.authkey) { log('authkey が入力されなかったためスキップします'); break; }
+            authkey = answer.authkey;
+            log('別の authkey で再試行します...');
+            continue;
+          }
+          if (choice === 'loginup') {
+            try {
+              log('通常の tailscale up 認証を開始します。ログに表示される URL をブラウザで開いて認証してください...');
+              await tailscaleLoginUp(name, log);
+              log('Tailscale 認証完了');
+            } catch (e2) {
+              log(`WARNING: tailscale up 認証に失敗しました（作成は継続します）: ${e2.message}`);
+            }
+            break;
+          }
+          log('Tailscale 認証をスキップします（作成は継続します）');
+          break;
+        }
       }
     }
   }
@@ -535,6 +593,23 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
 
+  // 作成中の対話プロンプト（Tailscale 認証失敗時の選択）への応答を受け取る。
+  if (pathname === '/api/instances/create/respond' && req.method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const promptId = String(body.promptId || '');
+      const waiter = createPromptWaiters.get(promptId);
+      if (!waiter) return json(res, 404, { error: 'プロンプトが見つかりません（タイムアウトまたは応答済み）' });
+      createPromptWaiters.delete(promptId);
+      if (waiter.timer) clearTimeout(waiter.timer);
+      waiter.resolve({
+        choice: String(body.choice || 'skip'),
+        authkey: String(body.authkey || '').replace(/[\r\n]/g, '').trim()
+      });
+      return json(res, 200, { ok: true });
+    } catch (e) { return json(res, 500, { error: e.message }); }
+  }
+
   if (pathname === '/api/instances/create/stream' && req.method === 'POST') {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
@@ -544,6 +619,32 @@ const server = http.createServer(async (req, res) => {
     });
     res.write(':\n\n');
     const send = (evt, data) => { try { res.write(`event: ${evt}\ndata: ${JSON.stringify(data)}\n\n`); } catch (e) {} };
+
+    // 作成中の対話プロンプトを作り、クライアント（/api/instances/create/respond）からの
+    // 応答が返るまで待つ。タイムアウト/切断時は 'skip' にフォールバックする。
+    const promptIds = new Set();
+    const prompt = (payload) => new Promise((resolve) => {
+      const promptId = crypto.randomUUID();
+      const timer = setTimeout(() => {
+        if (createPromptWaiters.delete(promptId)) { promptIds.delete(promptId); resolve({ choice: 'skip', timedOut: true }); }
+      }, 1800000); // 30分でタイムアウト → スキップ
+      createPromptWaiters.set(promptId, {
+        timer,
+        resolve: (v) => { promptIds.delete(promptId); resolve(v); }
+      });
+      promptIds.add(promptId);
+      send('prompt', { promptId, ...payload });
+    });
+    // クライアント切断時に待機中プロンプトを解放（作成フローを止めない）。
+    res.on('close', () => {
+      for (const id of promptIds) {
+        const w = createPromptWaiters.get(id);
+        if (w) { if (w.timer) clearTimeout(w.timer); w.resolve({ choice: 'skip', closed: true }); }
+        createPromptWaiters.delete(id);
+      }
+      promptIds.clear();
+    });
+
     try {
       const body = await parseBody(req);
       if (!body.name || !body.image) { send('error', { error: 'name and image are required' }); res.end(); return; }
@@ -555,7 +656,8 @@ const server = http.createServer(async (req, res) => {
           tailscaleAuthkey: String(body.tailscaleAuthkey || '').replace(/[\r\n]/g, '').trim(),
           snapTailscaleOK: !!body.snapTailscaleOK
         },
-        (msg) => send('log', { message: msg })
+        (msg) => send('log', { message: msg }),
+        prompt
       );
       send('done', { message: result });
     } catch (e) {
