@@ -958,6 +958,11 @@ const server = http.createServer(async (req, res) => {
       // アプリ本体は127.0.0.1:3364で待機し、Tailscale Serve (HTTPS) が3364で公開する。
       port: 3364,
       installCmds: [
+        // 素のコンテナでは curl / git / node が無いことがあるため、無ければ導入する。
+        'command -v curl >/dev/null 2>&1 || (apt-get update && apt-get install -y curl)',
+        'command -v git >/dev/null 2>&1 || (apt-get update && apt-get install -y git)',
+        'command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 || { curl -fsSL https://deb.nodesource.com/setup_22.x | bash -; apt-get install -y nodejs; }',
+        'node -v && npm -v',
         // 再インストールに備え clone 先を初期化してから指定コマンドを実行する。
         'cd /opt',
         'rm -rf newsflow',
