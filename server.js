@@ -955,6 +955,7 @@ const server = http.createServer(async (req, res) => {
     newsflow: {
       label: 'News Flow',
       installDir: '/opt/newsflow',
+      // アプリ本体は127.0.0.1:3364で待機し、Tailscale Serve (HTTPS) が3364で公開する。
       port: 3364,
       installCmds: [
         // 再インストールに備え clone 先を初期化してから指定コマンドを実行する。
@@ -982,7 +983,11 @@ const server = http.createServer(async (req, res) => {
         'WantedBy=multi-user.target',
         'EOF',
         'systemctl daemon-reload',
-        'systemctl enable --now newsflow'
+        'systemctl enable --now newsflow',
+        // Tailscale Serve で HTTPS 公開（README §7b と同一。--bg で永続化）。
+        // 他ポートの公開には触れないため reset はしない。
+        'tailscale serve --bg --https=3364 http://127.0.0.1:3364',
+        'tailscale serve status'
       ]
     },
     immich: {
