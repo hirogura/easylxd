@@ -952,6 +952,39 @@ const server = http.createServer(async (req, res) => {
       port: 3349,
       installCmds: ['sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/hirogura/taildropweb/main/install-taildropweb.sh)"']
     },
+    newsflow: {
+      label: 'News Flow',
+      installDir: '/opt/newsflow',
+      port: 3364,
+      installCmds: [
+        // 再インストールに備え clone 先を初期化してから指定コマンドを実行する。
+        'cd /opt',
+        'rm -rf newsflow',
+        'git clone https://github.com/hirogura/newsflow.git /opt/newsflow',
+        'cd /opt/newsflow',
+        'npm install',
+        // systemd 常駐化（24時間運用）。README の unit と同一内容。
+        'cat > /etc/systemd/system/newsflow.service <<EOF',
+        '[Unit]',
+        'Description=Newsflow digital signage (local news TTS)',
+        'After=network-online.target',
+        'Wants=network-online.target',
+        '[Service]',
+        'Type=simple',
+        'WorkingDirectory=/opt/newsflow',
+        'Environment=PORT=3364',
+        'ExecStart=/usr/bin/node /opt/newsflow/server.js',
+        'Restart=always',
+        'RestartSec=5',
+        'StandardOutput=journal',
+        'StandardError=journal',
+        '[Install]',
+        'WantedBy=multi-user.target',
+        'EOF',
+        'systemctl daemon-reload',
+        'systemctl enable --now newsflow'
+      ]
+    },
     immich: {
       label: 'immich',
       installDir: '/opt/docker/immich',
