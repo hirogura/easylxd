@@ -995,16 +995,22 @@ const server = http.createServer(async (req, res) => {
         'tailscale serve status'
       ]
     },
-    immich: {
-      label: 'immich',
-      installDir: '/opt/docker/immich',
-      // アプリ本体は2283で待機し、Tailscale Serve (HTTPS) が3307で公開する。
-      // Docker Compose 必須のため requiresDocker を付ける。
-      port: 3307,
-      requiresDocker: true,
+    selfocr: {
+      label: 'selfOCR',
+      installDir: '/opt/selfocr',
+      // アプリ本体は127.0.0.1:3369で待機し、Tailscale Serve (HTTPS) が3369で公開する。
+      port: 3369,
       installCmds: [
-        'curl -fsSL -o /tmp/install-immich.sh https://raw.githubusercontent.com/hirogura/scripts/main/install-immich.sh',
-        'sudo bash /tmp/install-immich.sh'
+        // 素のコンテナでは git / python3 が無いことがあるため、無ければ導入する。
+        'command -v git >/dev/null 2>&1 || (apt-get update && apt-get install -y git)',
+        'command -v python3 >/dev/null 2>&1 || (apt-get update && apt-get install -y python3 python3-venv)',
+        // 再インストールに備え clone 先を初期化してから指定コマンドを実行する。
+        'cd /opt',
+        'rm -rf selfocr',
+        'git clone https://github.com/hirogura/selfocr.git /opt/selfocr',
+        'cd /opt/selfocr',
+        // venv 作成 → systemd 登録 → 起動 → Tailscale Serve 公開まで行う。
+        'bash ./scripts/install.sh'
       ]
     }
   };
