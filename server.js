@@ -1034,6 +1034,29 @@ const server = http.createServer(async (req, res) => {
         // venv 作成 → systemd 登録 → 起動 → Tailscale Serve 公開まで行う。
         'bash ./scripts/install.sh'
       ]
+    },
+    faceblur: {
+      label: 'faceblur',
+      installDir: '/opt/faceblur',
+      service: 'faceblur',
+      // アプリ本体は127.0.0.1:3370で待機し、Tailscale Serve (HTTPS) が3370で公開する。
+      port: 3370,
+      installCmds: [
+        // 素のコンテナでは git / python3 / curl が無いことがあるため、無ければ導入する。
+        'command -v git >/dev/null 2>&1 || (apt-get update && apt-get install -y git)',
+        'command -v python3 >/dev/null 2>&1 || (apt-get update && apt-get install -y python3)',
+        'command -v curl >/dev/null 2>&1 || (apt-get update && apt-get install -y curl)',
+        // venv 作成には ensurepip が必要。Debian/Ubuntu では python3-venv が別パッケージの
+        // ため、python3 が入っていても未導入のことがあるため必ず確認する。
+        'python3 -c "import ensurepip" >/dev/null 2>&1 || (apt-get update && apt-get install -y python3-venv)',
+        // 再インストールに備え clone 先を初期化してから指定コマンドを実行する。
+        'cd /opt',
+        'rm -rf faceblur',
+        'git clone https://github.com/hirogura/faceblur.git /opt/faceblur',
+        'cd /opt/faceblur',
+        // venv 作成 → systemd 登録 → 起動 → Tailscale Serve 公開まで行う。
+        'bash ./scripts/install.sh'
+      ]
     }
   };
 
