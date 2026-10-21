@@ -877,18 +877,23 @@ const server = http.createServer(async (req, res) => {
     selfex: {
       label: 'selfEx',
       installDir: '/opt/selfex',
+      // systemd ユニット名。ユニットファイルはコンテナ本体のファイルシステムにあるため、
+      // スナップショット復元で正しく巻き戻る（インストール判定の主材料）。
+      service: 'selfex',
       port: 3362,
       installCmds: ['sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/hirogura/selfex/main/install-selfex1.sh)"']
     },
     selfnote: {
       label: 'SelfNote',
       installDir: '/opt/selfnote',
+      service: 'selfnote',
       port: 3342,
       installCmds: ['sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/hirogura/selfnote/main/install-selfnote.sh)"']
     },
     selfrss: {
       label: 'selfrss',
       installDir: '/opt/selfrss',
+      service: 'selfrss',
       port: 3347,
       installCmds: [
         // 再インストールに備え clone 先を初期化してから指定コマンドを実行する。
@@ -901,7 +906,12 @@ const server = http.createServer(async (req, res) => {
     selfmark: {
       label: 'selfmark',
       // インストール先は /opt/lxd-data（ブラウズ共有領域）配下なので注意。
+      // この共有領域はホスト側にあるためスナップショット復元では巻き戻らず、
+      // ディレクトリ有無だけで判定すると「復元済みだが未インストール」の状態を
+      // 「インストール済み」と誤判定してインストールできなくなる。
+      // 判定はコンテナ本体側の systemd ユニット（有は巻き戻る）を主材料にする。
       installDir: '/opt/lxd-data/selfmark',
+      service: 'selfmark',
       port: 3356,
       installCmds: [
         'curl -fsSL -o install-selfmark1.sh https://raw.githubusercontent.com/hirogura/selfmark/main/install-selfmark1.sh',
@@ -911,6 +921,7 @@ const server = http.createServer(async (req, res) => {
     selfphoto: {
       label: 'selfphoto',
       installDir: '/opt/selfphoto',
+      service: 'selfphoto-server',
       port: 3360,
       installCmds: [
         // 再インストールに備え clone 先を初期化してから指定コマンドを実行する。
@@ -923,7 +934,10 @@ const server = http.createServer(async (req, res) => {
     },
     spw: {
       label: 'SPW',
+      // インストール先は /opt/lxd-data（共有領域）配下。selfmark と同じく
+      // スナップショット復元で巻き戻らないため、判定は systemd ユニットを主材料にする。
       installDir: '/opt/lxd-data/spw',
+      service: 'spw',
       // アプリ本体は3345で待機し、Tailscale Serve (HTTPS) が3344で公開する。
       port: 3344,
       installCmds: [
@@ -934,6 +948,7 @@ const server = http.createServer(async (req, res) => {
     rclonegui: {
       label: 'rcloneGUI',
       installDir: '/opt/rclonegui',
+      service: 'rclonegui',
       port: 3348,
       installCmds: [
         'curl -fsSL https://raw.githubusercontent.com/hirogura/rclonegui/main/install-rclonegui.sh -o install-rclonegui.sh',
@@ -943,18 +958,21 @@ const server = http.createServer(async (req, res) => {
     rsyncgui: {
       label: 'rsyncGUI',
       installDir: '/opt/rsyncgui',
+      service: 'rsyncgui',
       port: 3326,
       installCmds: ['curl -fsSL https://raw.githubusercontent.com/hirogura/rsyncgui/main/install-rsyncgui.sh | sudo bash']
     },
     taildropweb: {
       label: 'Taildrop Web',
       installDir: '/opt/taildrop-web',
+      service: 'taildrop-web',
       port: 3349,
       installCmds: ['sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/hirogura/taildropweb/main/install-taildropweb.sh)"']
     },
     newsflow: {
       label: 'News Flow',
       installDir: '/opt/newsflow',
+      service: 'newsflow',
       // アプリ本体は127.0.0.1:3364で待機し、Tailscale Serve (HTTPS) が3364で公開する。
       port: 3364,
       installCmds: [
@@ -998,6 +1016,7 @@ const server = http.createServer(async (req, res) => {
     selfocr: {
       label: 'selfOCR',
       installDir: '/opt/selfocr',
+      service: 'selfocr',
       // アプリ本体は127.0.0.1:3369で待機し、Tailscale Serve (HTTPS) が3369で公開する。
       port: 3369,
       installCmds: [
@@ -1024,10 +1043,24 @@ const server = http.createServer(async (req, res) => {
   function writeApps(apps) {
     fs.writeFileSync(APPS_FILE, JSON.stringify(apps, null, 2) + '\n');
   }
-  // インストール済み判定はアプリごとのインストールディレクトリの有無で行う。
+  // インストール済み判定。
+  // 判定材料は「コンテナ本体のファイルシステム上にあるもの」だけを使う。
+  //
+  // インストール先のディレクトリ (installDir) だけでは判定できないアプリがある。
+  // /opt/lxd-data はホストと共有する領域としてコンテナにマウントされており、
+  // スナップショット復元 (lxc restore) で巻き戻らない。そのため installDir が
+  // 共有領域配下にある selfmark / SPW は、復元後もディレクトリが残っており
+  // 「インストール済み」と誤判定されてインストールボタンが出なくなる。
+  //
+  // systemd のユニットファイルはコンテナ本体のファイルシステム (/etc/systemd/system)
+  // にあり復元で正しく巻き戻るため、判定の主材料として使う。
   async function isAppInstalled(name, cfg) {
     try {
-      await lxcExec(name, `test -d ${cfg.installDir}`, 15000);
+      const checks = [];
+      if (cfg.installDir) checks.push(`test -d ${cfg.installDir}`);
+      if (cfg.service) checks.push(`test -f /etc/systemd/system/${cfg.service}.service`);
+      if (!checks.length) return false;
+      await lxcExec(name, checks.join('\n'), 15000);
       return true;
     } catch (e) { return false; }
   }
