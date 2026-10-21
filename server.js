@@ -1003,7 +1003,10 @@ const server = http.createServer(async (req, res) => {
       installCmds: [
         // 素のコンテナでは git / python3 が無いことがあるため、無ければ導入する。
         'command -v git >/dev/null 2>&1 || (apt-get update && apt-get install -y git)',
-        'command -v python3 >/dev/null 2>&1 || (apt-get update && apt-get install -y python3 python3-venv)',
+        'command -v python3 >/dev/null 2>&1 || (apt-get update && apt-get install -y python3)',
+        // venv 作成には ensurepip が必要。Debian/Ubuntu では python3-venv が別パッケージの
+        // ため、python3 が入っていても未導入のことがあるため必ず確認する。
+        'python3 -c "import ensurepip" >/dev/null 2>&1 || (apt-get update && apt-get install -y python3-venv)',
         // 再インストールに備え clone 先を初期化してから指定コマンドを実行する。
         'cd /opt',
         'rm -rf selfocr',
