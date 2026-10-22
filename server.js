@@ -1080,6 +1080,29 @@ const server = http.createServer(async (req, res) => {
         // venv 作成 → systemd 登録 → 起動 → Tailscale Serve 公開まで行う。
         'bash ./scripts/install.sh'
       ]
+    },
+    htmledit: {
+      label: 'htmledit',
+      installDir: '/opt/htmledit',
+      service: 'htmledit',
+      // アプリ本体は127.0.0.1:3372で待機し、Tailscale Serve (HTTPS) が3372で公開する。
+      port: 3372,
+      installCmds: [
+        // 素のコンテナでは git / python3 / curl が無いことがあるため、無ければ導入する。
+        'command -v git >/dev/null 2>&1 || (apt-get update && apt-get install -y git)',
+        'command -v python3 >/dev/null 2>&1 || (apt-get update && apt-get install -y python3)',
+        'command -v curl >/dev/null 2>&1 || (apt-get update && apt-get install -y curl)',
+        // htmledit は Python 3.11 以上を要求する。python3 が 3.11 未満の環境 (Ubuntu 22.04 は 3.10) では
+        // python3.11 を導入し、PATH 先頭に python3 シムを置く (install.sh は python3 を PATH から解決するため)。
+        'python3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)" || { apt-get update && apt-get install -y python3.11 || { echo "htmledit は Python 3.11 以上が必要です (python3.11 を導入できませんでした)" >&2; exit 1; }; mkdir -p /opt/htmledit-bin; ln -sf /usr/bin/python3.11 /opt/htmledit-bin/python3; export PATH="/opt/htmledit-bin:$PATH"; }',
+        // 再インストールに備え clone 先を初期化してから指定コマンドを実行する。
+        'cd /opt',
+        'rm -rf htmledit',
+        'git clone https://github.com/hirogura/htmledit.git /opt/htmledit',
+        'cd /opt/htmledit',
+        // systemd 登録 → 起動 → Tailscale Serve 公開まで install.sh が行う。
+        'bash ./deploy/install.sh'
+      ]
     }
   };
 
