@@ -1172,7 +1172,26 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return json(res, 500, { error: e.message }); }
   }
 
-  const appActionMatch = pathname.match(/^\/api\/apps\/([^/]+)\/(register|install\/stream)$/);
+  const appActionMatch = pathname.match(/^\/api\/apps\/([^/]+)\/(register|unregister|install\/stream)$/);
+  // 登録解除: apps.json からエントリを取り除くだけ。アプリ本体やインストール領域には触れない
+  // （スナップショット復元などで実際には未インストールになってしまった登録の掃除と、
+  //  解除後に再登録を可能にするため）。
+  if (appActionMatch && appActionMatch[2] === 'unregister' && req.method === 'POST') {
+    try {
+      const [, appId] = appActionMatch;
+      const cfg = APP_REGISTRY[appId];
+      if (!cfg) return json(res, 404, { error: `Unknown app: ${appId}` });
+      const body = await parseBody(req);
+      if (!body.container) return json(res, 400, { error: 'container is required' });
+      const apps = readApps();
+      const before = apps[appId] || [];
+      const after = before.filter(c => c !== body.container);
+      if (after.length === before.length) return json(res, 404, { error: `${body.container} は ${cfg.label} に登録されていません` });
+      apps[appId] = after;
+      writeApps(apps);
+      return json(res, 200, { ok: true, message: `${body.container} を ${cfg.label} から解除しました` });
+    } catch (e) { return json(res, 500, { error: e.message }); }
+  }
   if (appActionMatch && appActionMatch[2] === 'register' && req.method === 'POST') {
     try {
       const [, appId] = appActionMatch;
