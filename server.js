@@ -1103,6 +1103,52 @@ const server = http.createServer(async (req, res) => {
         // systemd 登録 → 起動 → Tailscale Serve 公開まで install.sh が行う。
         'bash ./deploy/install.sh'
       ]
+    },
+    honyaku: {
+      label: 'honyaku',
+      installDir: '/opt/honyaku',
+      service: 'honyaku',
+      // アプリ本体は127.0.0.1:3374で待機 (run.sh 固定) し、Tailscale Serve (HTTPS) が3374で公開する。
+      // Ollama 本体と plamo-3-translate モデルは honyaku 画面右上のボタンから導入できるため
+      // ここでは venv 構築と systemd 登録までを行う。
+      port: 3374,
+      installCmds: [
+        // 素のコンテナでは git / python3 / curl が無いことがあるため、無ければ導入する。
+        'command -v git >/dev/null 2>&1 || (apt-get update && apt-get install -y git)',
+        'command -v python3 >/dev/null 2>&1 || (apt-get update && apt-get install -y python3)',
+        'command -v curl >/dev/null 2>&1 || (apt-get update && apt-get install -y curl)',
+        // venv 作成には ensurepip が必要。Debian/Ubuntu では python3-venv が別パッケージの
+        // ため、python3 が入っていても未導入のことがあるため必ず確認する。
+        'python3 -c "import ensurepip" >/dev/null 2>&1 || (apt-get update && apt-get install -y python3-venv)',
+        // 再インストールに備え clone 先を初期化してから venv 構築まで行う。
+        'cd /opt',
+        'rm -rf honyaku',
+        'git clone https://github.com/hirogura/honyaku.git /opt/honyaku',
+        'cd /opt/honyaku',
+        'python3 -m venv .venv',
+        '.venv/bin/pip install -r requirements.txt',
+        // honyaku にはインストールスクリプトが無いため systemd ユニットをここで作成する。
+        'cat > /etc/systemd/system/honyaku.service <<EOF',
+        '[Unit]',
+        'Description=honyaku',
+        'After=network.target',
+        '',
+        '[Service]',
+        'Type=simple',
+        'WorkingDirectory=/opt/honyaku',
+        'ExecStart=/opt/honyaku/run.sh',
+        'Restart=on-failure',
+        '',
+        '[Install]',
+        'WantedBy=multi-user.target',
+        'EOF',
+        'systemctl daemon-reload',
+        'systemctl enable --now honyaku.service',
+        'sleep 2',
+        'systemctl is-active --quiet honyaku.service || { journalctl -u honyaku.service --no-pager --lines=30 >&2 || true; echo "honyaku.service が起動しません" >&2; exit 1; }',
+        // Tailscale Serve (HTTPS) で公開する。失敗してもインストール自体は完了させる。
+        'command -v tailscale >/dev/null 2>&1 && tailscale serve --bg --yes --https=3374 "http://127.0.0.1:3374" >/dev/null || echo "tailscale serve を設定できませんでした (後から手動で実行してください)"'
+      ]
     }
   };
 
