@@ -1149,6 +1149,27 @@ const server = http.createServer(async (req, res) => {
         // Tailscale Serve (HTTPS) で公開する。失敗してもインストール自体は完了させる。
         'command -v tailscale >/dev/null 2>&1 && tailscale serve --bg --yes --https=3374 "http://127.0.0.1:3374" >/dev/null || echo "tailscale serve を設定できませんでした (後から手動で実行してください)"'
       ]
+    },
+    shoppinglist: {
+      label: 'shoppinglist',
+      installDir: '/opt/shoppinglist',
+      service: 'shoppinglist',
+      // アプリ本体は127.0.0.1:3368で待機し、Tailscale Serve (HTTPS) が3368で公開する。
+      port: 3368,
+      installCmds: [
+        // 素のコンテナでは git / curl / node が無いことがあるため、無ければ導入する。
+        'command -v git >/dev/null 2>&1 || (apt-get update && apt-get install -y git)',
+        'command -v curl >/dev/null 2>&1 || (apt-get update && apt-get install -y curl)',
+        'command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 || { curl -fsSL https://deb.nodesource.com/setup_22.x | bash -; apt-get install -y nodejs; }',
+        'node -v && npm -v',
+        // 再インストールに備え clone 先を初期化してから指定コマンドを実行する。
+        'cd /opt',
+        'rm -rf shoppinglist',
+        'git clone https://github.com/hirogura/shoppinglist.git /opt/shoppinglist',
+        'cd /opt/shoppinglist',
+        // npm install → systemd 登録 → 起動 → Tailscale Serve 公開まで install.sh が行う。
+        'bash ./deploy/install.sh'
+      ]
     }
   };
 
