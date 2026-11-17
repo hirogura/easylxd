@@ -969,6 +969,25 @@ const server = http.createServer(async (req, res) => {
       port: 3349,
       installCmds: ['sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/hirogura/taildropweb/main/install-taildropweb.sh)"']
     },
+    selfrdp: {
+      label: 'selfRDP',
+      installDir: '/opt/selfrdp',
+      service: 'selfrdp',
+      // アプリ本体は127.0.0.1:7173で待機し、Tailscale Serve (HTTPS) が3375で公開する。
+      port: 3375,
+      installCmds: [
+        // 素のコンテナでは git / curl が無いことがあるため、無ければ導入する。
+        'command -v git >/dev/null 2>&1 || (apt-get update && apt-get install -y git)',
+        'command -v curl >/dev/null 2>&1 || (apt-get update && apt-get install -y curl)',
+        // 再インストールに備え clone 先を初期化してからインストーラを実行する。
+        'cd /opt',
+        'rm -rf selfrdp',
+        'git clone https://github.com/hirogura/selfrdp.git /opt/selfrdp',
+        'cd /opt/selfrdp',
+        // systemd 登録 → 起動 → Tailscale Serve 公開まで install-selfrdp.sh が行う。
+        'bash ./install-selfrdp.sh'
+      ]
+    },
     newsflow: {
       label: 'News Flow',
       installDir: '/opt/newsflow',
