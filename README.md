@@ -1,6 +1,6 @@
 # Easy LXD UI
 
-LXD インスタンスをブラウザから管理するための Web UI です（v3.0.0）。
+LXD インスタンスをブラウザから管理するための Web UI です（v3.0.1）。
 アプリ本体は `127.0.0.1:3329` で待ち受け、Tailscale Serve 経由で Tailnet 内にのみ HTTPS 公開されます。
 
 <img width="512" height="309" alt="Image" src="https://github.com/user-attachments/assets/7a83155c-d35c-4f78-8e4c-3e367c62a16d" />
